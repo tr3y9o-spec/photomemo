@@ -1,0 +1,14 @@
+# node
+node_modules/
+npm-debug.log*
+
+# テストの出力（OUT_DIR をこの中に向けたとき用。既定は OS の一時フォルダ）
+test-out/
+
+# アプリの書き出し物（持ち出し用の zip。手元に置いても履歴には入れない）
+photomemo_*.zip
+
+# OS が勝手に作るもの
+.DS_Store
+Thumbs.db
+desktop.ini

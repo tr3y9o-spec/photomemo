@@ -1,0 +1,897 @@
+/* app.js — 画面と流れ。
+   背骨は1つだけ: 「保存」は常に1タップで、常に成功する。
+   必須項目を作らない / 保存後に何も聞かない / あとから直せる。この3つを崩さない。 */
+(function (g) {
+  'use strict';
+
+  var $ = function (s) { return document.querySelector(s); };
+  var VISIBLE_TAGS = 12;
+  var DEFAULT_FOLDERS = ['未分類', '場所', 'もの', '資料', 'あとで見る'];
+
+  var S = {
+    view: 'folders',      // folders | grid | search
+    folderId: null,
+    folders: [],
+    tags: [],
+    items: [],
+    urls: [],             // 生きている ObjectURL。描き直すたびに回収する
+    pendingUrl: null,     // 共有シート等で受け取った URL
+    undo: null
+  };
+
+  var M = {               // モーダルの状態
+    mode: 'new',          // new | edit
+    drafts: [],           // [{id, blob, thumb, ...}]
+    idx: 0,
+    folderId: null,
+    tags: [],
+    tagsOpen: false
+  };
+
+  /* ================= 小物 ================= */
+  function uid() {
+    return (Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+  }
+  function today() { return new Date().toISOString().slice(0, 10); }
+  function ymd(ms) {
+    var d = new Date(ms);
+    return isNaN(d) ? today() :
+      d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function url(blob) { var u = URL.createObjectURL(blob); S.urls.push(u); return u; }
+  function freeUrls() { S.urls.forEach(URL.revokeObjectURL); S.urls = []; }
+
+  /* 削除。向こうへ既に送ってあるものだけ墓標を立てる。
+     一度も送っていないものは、向こうに無いので墓標が要らない。 */
+  function 消す(id) {
+    return DB.getItem(id).then(function (it) {
+      return DB.delItem(id, !!(it && it.syncedAt));
+    });
+  }
+
+  var toastTimer = null;
+  function toast(msg, undoFn) {
+    $('#toast-msg').textContent = msg;
+    $('#toast-undo').hidden = !undoFn;
+    S.undo = undoFn || null;
+    $('#toast').hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { $('#toast').hidden = true; S.undo = null; }, 5000);
+  }
+
+  /* ================= 起動 ================= */
+  function boot() {
+    if (!sessionStorage.getItem('warn-dismissed')) $('#sandbox-warn').hidden = false;
+
+    DB.open()
+      .then(seedFolders)
+      .then(reload)
+      .then(function () {
+        takeSharedUrl();
+        render();
+        同期する(true);   // 起動時に一度。失敗しても黙って次の機会に。
+      })
+      .catch(function (e) {
+        document.body.insertAdjacentHTML('afterbegin',
+          '<p class="fatal">保存領域を開けませんでした: ' + esc(e && e.message) + '</p>');
+      });
+
+    wire();
+    if (g.isSecureContext && navigator.serviceWorker) {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    }
+  }
+
+  function seedFolders() {
+    return DB.allFolders().then(function (fs) {
+      if (fs.length) return fs;
+      var now = new Date().toISOString();
+      return Promise.all(DEFAULT_FOLDERS.map(function (n, i) {
+        return DB.putFolder({ id: uid(), name: n, order: i, createdAt: now });
+      }));
+    });
+  }
+
+  function reload() {
+    return Promise.all([DB.allFolders(), DB.allTags(), DB.allItems()]).then(function (r) {
+      S.folders = r[0];
+      S.tags = r[1];
+      S.items = r[2].sort(function (a, b) {
+        return (b.date || '').localeCompare(a.date || '') || b.createdAt.localeCompare(a.createdAt);
+      });
+    });
+  }
+
+  /* 共有シート / ?url= で飛んできた URL を拾う。画像は付いてこないので預かるだけ。 */
+  function takeSharedUrl() {
+    var p = new URLSearchParams(location.search);
+    var u = p.get('url') || p.get('text') || '';
+    var m = String(u).match(/https?:\/\/\S+/);
+    if (m) {
+      S.pendingUrl = m[0];
+      history.replaceState(null, '', location.pathname);
+    }
+  }
+
+  /* ================= 描画 ================= */
+  function render() {
+    freeUrls();
+    $('#btn-back').hidden = (S.view === 'folders');
+    $('#view-folders').hidden = (S.view !== 'folders');
+    $('#view-grid').hidden = (S.view === 'folders');
+    if (S.view === 'folders') renderFolders(); else renderGrid();
+    renderPending();
+  }
+
+  function renderPending() {
+    var el = document.getElementById('pending');
+    if (!S.pendingUrl) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pending';
+      $('#main').insertAdjacentElement('beforebegin', el);
+    }
+    el.innerHTML = '<span>URL を預かっています。次に保存する画像に入ります。<br><code>' +
+      esc(S.pendingUrl) + '</code></span><button type="button" id="pending-x" aria-label="捨てる">×</button>';
+    $('#pending-x').onclick = function () { S.pendingUrl = null; renderPending(); };
+  }
+
+  function countIn(fid) {
+    return S.items.filter(function (i) { return i.folderId === fid; }).length;
+  }
+
+  function renderFolders() {
+    $('#title').textContent = 'フォルダ';
+    var v = $('#view-folders');
+    v.innerHTML = '';
+    S.folders.forEach(function (f) {
+      var n = countIn(f.id);
+      var cover = S.items.find(function (i) { return i.folderId === f.id && i.thumb; });
+      var d = document.createElement('button');
+      d.type = 'button';
+      d.className = 'folder';
+      d.innerHTML =
+        '<div class="fcover">' + (cover ? '<img alt="" src="' + url(cover.thumb) + '">' : '<span class="fempty">—</span>') + '</div>' +
+        '<div class="fname">' + esc(f.name) + '</div>' +
+        '<div class="fcount">' + n + '</div>';
+      d.onclick = function () { S.folderId = f.id; S.view = 'grid'; render(); };
+      v.appendChild(d);
+    });
+  }
+
+  function currentItems() {
+    if (S.view === 'search') return filterItems($('#q').value);
+    return S.items.filter(function (i) { return i.folderId === S.folderId; });
+  }
+
+  function renderGrid() {
+    var list = currentItems();
+    if (S.view === 'search') {
+      $('#title').textContent = '検索 (' + list.length + ')';
+    } else {
+      var f = S.folders.find(function (x) { return x.id === S.folderId; });
+      $('#title').textContent = (f ? f.name : 'フォルダ') + ' (' + list.length + ')';
+    }
+    var v = $('#view-grid');
+    v.innerHTML = '';
+    if (!list.length) {
+      v.innerHTML = '<p class="empty">' +
+        (S.view === 'search' ? '見つかりません' : 'まだ何もありません。<br>下の「写真から」か「カメラ」で足します。') + '</p>';
+      return;
+    }
+    list.forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tile';
+      if (it.waiting) b.classList.add('waiting');
+      var 画;
+      if (it.thumb) 画 = '<img alt="" loading="lazy" src="' + url(it.thumb) + '">';
+      else if (it.waiting) 画 = '<span class="noimg wait">画像待ち<br><small>' +
+        esc((it.memo || '').slice(0, 24) || 'メモのみ') + '</small></span>';
+      else 画 = '<span class="noimg">' + esc(it.name || '画像') +
+        '<br><small>この環境で開けない形式</small></span>';
+
+      b.innerHTML = 画 +
+        '<span class="badges">' +
+          (SYNC.未送信(it) ? '<span class="b b-sync" title="未同期">•</span>' : '') +
+          (it.memo ? '<span class="b b-memo" title="メモあり">✎</span>' : '') +
+          (it.url ? '<span class="b b-url" title="URLあり">🔗</span>' : '') +
+          (it.tags && it.tags.length ? '<span class="b">' + it.tags.length + '</span>' : '') +
+        '</span>' +
+        '<span class="tdate">' + esc(it.date || '') + '</span>';
+      b.onclick = function () { openEdit(it); };
+      v.appendChild(b);
+    });
+  }
+
+  function filterItems(q) {
+    q = (q || '').trim().toLowerCase();
+    if (!q) return [];
+    var terms = q.split(/\s+/);
+    var fname = {};
+    S.folders.forEach(function (f) { fname[f.id] = f.name.toLowerCase(); });
+    return S.items.filter(function (i) {
+      var hay = [i.memo || '', i.url || '', (i.tags || []).join(' '), fname[i.folderId] || '', i.date || '']
+        .join(' ').toLowerCase();
+      return terms.every(function (t) { return hay.indexOf(t) >= 0; });
+    });
+  }
+
+  /* ================= 取り込み ================= */
+  function intake(files) {
+    var arr = Array.prototype.slice.call(files || []).filter(function (f) { return f && f.size; });
+    if (!arr.length) return;
+    return Promise.all(arr.map(prepare)).then(function (drafts) {
+      openNew(drafts.filter(Boolean));
+    });
+  }
+
+  /* 1枚ぶんの下ごしらえ。ここで EXIF・サムネ・ハッシュまで済ませ、
+     「保存」を叩いたあとに重い仕事を残さない。 */
+  function prepare(file) {
+    return file.arrayBuffer().then(function (buf) {
+      var ex = LIB.readExif(buf);
+      return Promise.all([LIB.makeThumb(file), LIB.hashBuf(buf)]).then(function (r) {
+        var t = r[0];
+        var date, src;
+        if (ex.date) { date = ex.date; src = '撮影日(EXIF)'; }
+        else if (file.lastModified) { date = ymd(file.lastModified); src = 'ファイルの日時'; }
+        else { date = today(); src = '今日'; }
+        // 同期で「画像待ち」として先に届いていたメモがあれば、ここで引き取る
+        var 待ち = S.items.filter(function (i) {
+          return i.waiting && i.hash && i.hash === r[1];
+        })[0];
+
+        return {
+          id: 待ち ? 待ち.id : uid(), blob: file, thumb: t.thumb, w: t.w, h: t.h,
+          mime: file.type || '', name: file.name || '', hash: r[1],
+          date: 待ち && 待ち.date ? 待ち.date : date,
+          dateSrc: 待ち ? 'メモから復元' : src,
+          memo: 待ち ? (待ち.memo || '') : '',
+          url: 待ち ? (待ち.url || '') : (S.pendingUrl || ''),
+          dup: false, 復元: 待ち || null
+        };
+      });
+    }).catch(function () { return null; });
+  }
+
+  /* ================= モーダル ================= */
+  function openNew(drafts) {
+    if (!drafts.length) return;
+    M.mode = 'new'; M.drafts = drafts; M.idx = 0; M.tags = []; M.tagsOpen = false;
+    if (S.pendingUrl) S.pendingUrl = null;
+
+    // 既定のフォルダは「今いるフォルダ → 前回使ったフォルダ → 先頭」。必ず1つ選択済みで開く。
+    var pick = function (last) {
+      var ok = function (id) { return id && S.folders.some(function (f) { return f.id === id; }); };
+      var 復元 = (drafts.length === 1 && drafts[0].復元) ? drafts[0].復元 : null;
+      if (復元) {
+        M.folderId = ok(復元.folderId) ? 復元.folderId : (S.folders[0] && S.folders[0].id);
+        M.tags = (復元.tags || []).slice();
+      } else {
+        M.folderId = ok(S.folderId) ? S.folderId : (ok(last) ? last : (S.folders[0] && S.folders[0].id));
+      }
+      // 重複の目印。保存は止めない。
+      return Promise.all(drafts.map(function (d) {
+        return DB.findByHash(d.hash).then(function (hit) {
+          d.dup = hit.some(function (h) { return !h.waiting && h.id !== d.id; });
+        });
+      }));
+    };
+
+    DB.getMeta('lastFolder').then(pick).then(function () {
+      paintModal();
+      $('#modal').showModal();
+    });
+  }
+
+  function openEdit(item) {
+    DB.getBlob(item.id).then(function (b) {
+      M.mode = 'edit'; M.idx = 0; M.tagsOpen = false;
+      M.folderId = item.folderId;
+      M.tags = (item.tags || []).slice();
+      M.drafts = [{
+        id: item.id, blob: b, thumb: item.thumb, w: item.w, h: item.h,
+        mime: item.mime, name: item.name, hash: item.hash,
+        date: item.date, dateSrc: '', memo: item.memo || '', url: item.url || '',
+        dup: false, createdAt: item.createdAt
+      }];
+      paintModal();
+      $('#modal').showModal();
+    });
+  }
+
+  function paintModal() {
+    var d = M.drafts[M.idx], multi = M.drafts.length > 1;
+
+    $('#m-count').textContent = M.mode === 'edit' ? '' :
+      (multi ? (M.idx + 1) + ' / ' + M.drafts.length + ' 枚目' : '1 枚');
+    $('#m-del').hidden = (M.mode !== 'edit');
+    $('#m-scope-all').hidden = !multi;
+    $('#m-scope-all2').hidden = !multi;
+    Array.prototype.forEach.call(document.querySelectorAll('.lab .one'), function (e) { e.hidden = !multi; });
+
+    // プレビュー
+    var pv = $('#m-preview');
+    pv.classList.remove('big');
+    pv.innerHTML = '';
+    var show = d.blob || d.thumb;
+    if (show) {
+      var im = document.createElement('img');
+      im.alt = ''; im.src = url(show);
+      pv.appendChild(im);
+    } else {
+      pv.innerHTML = '<span class="noimg">' + esc(d.name || '画像') + '</span>';
+    }
+
+    // 複数枚のときだけ、切り替え用の帯
+    var st = $('#m-strip');
+    st.hidden = !multi;
+    st.innerHTML = '';
+    if (multi) {
+      M.drafts.forEach(function (x, i) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'sth' + (i === M.idx ? ' on' : '');
+        b.innerHTML = x.thumb ? '<img alt="" src="' + url(x.thumb) + '">' : '<span>?</span>';
+        b.onclick = function () { stash(); M.idx = i; paintModal(); };
+        st.appendChild(b);
+      });
+    }
+
+    $('#m-dup').hidden = !d.dup;
+    if (d.dup) $('#m-dup').textContent = '同じ画像が既にあります（保存はできます）';
+
+    paintFolders();
+    paintTags();
+
+    $('#m-memo').value = d.memo || '';
+    $('#m-date').value = d.date || today();
+    $('#m-date-src').textContent = d.dateSrc ? ('既定: ' + d.dateSrc) : '';
+    $('#m-url').value = d.url || '';
+  }
+
+  function paintFolders() {
+    var w = $('#m-folders');
+    w.innerHTML = '';
+    S.folders.forEach(function (f) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (f.id === M.folderId ? ' on' : '');
+      b.textContent = f.name;
+      b.onclick = function () { M.folderId = f.id; paintFolders(); };
+      w.appendChild(b);
+    });
+  }
+
+  /* タグの並び: よく使う順（回数、次に直近）。
+     withDraft が真のときだけ、まだ保存されていない入力中のタグを頭に足す。
+     整理画面がこれを引きずると、消したタグが残って見えるので既定は false。 */
+  function tagOrder(withDraft) {
+    var known = S.tags.slice().sort(function (a, b) {
+      return (b.count || 0) - (a.count || 0) ||
+             String(b.lastUsed || '').localeCompare(String(a.lastUsed || '')) ||
+             a.name.localeCompare(b.name);
+    }).map(function (t) { return t.name; });
+    if (!withDraft) return known;
+    var sel = M.tags.filter(function (n) { return known.indexOf(n) < 0; });
+    return sel.concat(known);
+  }
+
+  function paintTags() {
+    var w = $('#m-tags');
+    w.innerHTML = '';
+    var all = tagOrder(true);
+    var head = all.filter(function (n) { return M.tags.indexOf(n) >= 0; });
+    var rest = all.filter(function (n) { return M.tags.indexOf(n) < 0; });
+    var ordered = head.concat(rest);
+    var shown = M.tagsOpen ? ordered : ordered.slice(0, Math.max(VISIBLE_TAGS, head.length));
+
+    shown.forEach(function (n) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (M.tags.indexOf(n) >= 0 ? ' on' : '');
+      b.textContent = n;
+      b.onclick = function () {
+        var i = M.tags.indexOf(n);
+        if (i >= 0) M.tags.splice(i, 1); else M.tags.push(n);
+        paintTags();
+      };
+      w.appendChild(b);
+    });
+
+    if (!M.tagsOpen && ordered.length > shown.length) {
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'chip more';
+      more.textContent = 'すべて (' + ordered.length + ')';
+      more.onclick = function () { M.tagsOpen = true; paintTags(); };
+      w.appendChild(more);
+    }
+    if (!ordered.length) {
+      w.innerHTML = '<span class="hint">まだタグがありません。下で足せます。</span>';
+    }
+  }
+
+  /* 画面の入力を、今見ている1枚へ書き戻す */
+  function stash() {
+    var d = M.drafts[M.idx];
+    if (!d) return;
+    d.memo = $('#m-memo').value;
+    d.date = $('#m-date').value || today();
+    d.url = $('#m-url').value.trim();
+  }
+
+  function addNewTag() {
+    var i = $('#m-newtag'), n = i.value.trim();
+    if (!n) return;
+    if (M.tags.indexOf(n) < 0) M.tags.push(n);
+    if (!S.tags.some(function (t) { return t.name === n; })) {
+      S.tags.push({ name: n, count: 0, lastUsed: new Date().toISOString() });
+    }
+    i.value = '';
+    M.tagsOpen = true;
+    paintTags();
+  }
+
+  /* ---- 保存。ここで聞き返さない。失敗しうる分岐を作らない。 ---- */
+  function save() {
+    stash();
+    var now = new Date().toISOString();
+    var fid = M.folderId || (S.folders[0] && S.folders[0].id);
+    var tags = M.tags.slice();
+
+    var writes = M.drafts.map(function (d) {
+      var item = {
+        id: d.id, folderId: fid, tags: tags,
+        memo: d.memo || '', date: d.date || today(), url: d.url || '',
+        createdAt: d.createdAt || now, updatedAt: now,
+        mime: d.mime, name: d.name, hash: d.hash, w: d.w, h: d.h, thumb: d.thumb
+      };
+      return DB.putItem(item, d.blob);
+    });
+
+    var ids = M.drafts.map(function (d) { return d.id; });
+    var isNew = (M.mode === 'new');
+
+    Promise.all(writes)
+      .then(function () { return DB.bumpTags(tags); })
+      .then(function () { return DB.setMeta('lastFolder', fid); })
+      .then(reload)
+      .then(function () {
+        $('#modal').close();
+        // 新規なら必ず保存先を開く。ここで画面が動かないと「保存された」が伝わらない。
+        if (isNew) {
+          S.folderId = fid; S.view = 'grid';
+          $('#searchbar').hidden = true; $('#q').value = '';
+        }
+        render();
+        同期を予約();
+        if (isNew) {
+          toast(ids.length + ' 枚 保存', function () {
+            Promise.all(ids.map(消す)).then(reload).then(render);
+          });
+        } else {
+          toast('更新', null);
+        }
+      })
+      .catch(function (e) {
+        toast('保存できませんでした: ' + (e && e.message), null);
+      });
+  }
+
+  function removeCurrent() {
+    var d = M.drafts[0];
+    DB.getItem(d.id).then(function (old) {
+      return DB.getBlob(d.id).then(function (blob) {
+        return 消す(d.id).then(reload).then(function () {
+          $('#modal').close();
+          render();
+          同期を予約();
+          toast('削除', function () {
+            // 取り消したら墓標も取り下げる
+            DB.delGrave(old.id).then(function () { return DB.putItem(old, blob); })
+              .then(reload).then(render);
+          });
+        });
+      });
+    });
+  }
+
+  /* ================= フォルダ整理 ================= */
+  function openFolderMan() {
+    var w = $('#folderman-list');
+    w.innerHTML = '';
+    S.folders.forEach(function (f, i) {
+      var row = document.createElement('div');
+      row.className = 'mrow';
+      row.innerHTML =
+        '<input type="text" value="' + esc(f.name) + '">' +
+        '<span class="n">' + countIn(f.id) + '</span>' +
+        '<button type="button" class="up" aria-label="上へ"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
+        '<button type="button" class="rm danger" aria-label="削除">×</button>';
+      row.querySelector('input').onchange = function (e) {
+        var 新 = e.target.value.trim();
+        if (!新 || 新 === f.name) { openFolderMan(); return; }
+        f.name = 新;
+        // 行の folder 列はフォルダ名。中の画像を触らないと向こうへ伝わらない。
+        var now = new Date().toISOString();
+        var 中身 = S.items.filter(function (it) { return it.folderId === f.id; })
+          .map(function (it) { it.updatedAt = now; return DB.putItem(it, null); });
+        DB.putFolder(f).then(function () { return Promise.all(中身); })
+          .then(reload).then(function () { openFolderMan(); render(); 同期を予約(); });
+      };
+      row.querySelector('.up').onclick = function () {
+        var prev = S.folders[i - 1];
+        var a = f.order, b = prev.order;
+        f.order = b; prev.order = a;
+        Promise.all([DB.putFolder(f), DB.putFolder(prev)]).then(reload)
+          .then(function () { openFolderMan(); render(); });
+      };
+      row.querySelector('.rm').onclick = function () {
+        var n = countIn(f.id);
+        if (S.folders.length < 2) { toast('最後の1つは消せません', null); return; }
+        if (n && !confirm(f.name + ' の中の ' + n + ' 枚を「' + S.folders.filter(function (x) { return x.id !== f.id; })[0].name + '」へ移して消します。よろしいですか')) return;
+        var to = S.folders.filter(function (x) { return x.id !== f.id; })[0];
+        var moves = S.items.filter(function (it) { return it.folderId === f.id; })
+          .map(function (it) { it.folderId = to.id; return DB.putItem(it, null); });
+        Promise.all(moves).then(function () { return DB.delFolder(f.id); })
+          .then(reload).then(function () { openFolderMan(); render(); });
+      };
+      w.appendChild(row);
+    });
+    $('#folderman').showModal();
+  }
+
+  /* ================= タグ整理（改名・統合・削除） ================= */
+  function openTagMan() {
+    var w = $('#tagman-list');
+    w.innerHTML = '';
+    var used = {};
+    S.items.forEach(function (i) { (i.tags || []).forEach(function (t) { used[t] = (used[t] || 0) + 1; }); });
+    var list = tagOrder(false);
+    Object.keys(used).forEach(function (n) { if (list.indexOf(n) < 0) list.push(n); });
+    if (!list.length) w.innerHTML = '<p class="hint">まだタグがありません。</p>';
+    list.forEach(function (n) {
+      var row = document.createElement('div');
+      row.className = 'mrow';
+      row.innerHTML = '<input type="text" value="' + esc(n) + '"><span class="n">' + (used[n] || 0) + '</span>' +
+        '<button type="button" class="rm danger" aria-label="削除">×</button>';
+      row.querySelector('input').onchange = function (e) {
+        var to = e.target.value.trim();
+        if (!to || to === n) { openTagMan(); return; }
+        renameTag(n, to);
+      };
+      row.querySelector('.rm').onclick = function () {
+        if (!confirm('タグ「' + n + '」を ' + (used[n] || 0) + ' 枚から外します。画像は消えません。')) return;
+        renameTag(n, null);
+      };
+      w.appendChild(row);
+    });
+    $('#tagman').showModal();
+  }
+
+  /* to が null なら削除、既存の名前なら統合、新しい名前なら改名。
+     タグは名前そのものを items に持たせているので、ここで全部書き換える。 */
+  function renameTag(from, to) {
+    var touched = S.items.filter(function (i) { return (i.tags || []).indexOf(from) >= 0; });
+    var writes = touched.map(function (i) {
+      var t = i.tags.filter(function (x) { return x !== from; });
+      if (to && t.indexOf(to) < 0) t.push(to);
+      i.tags = t; i.updatedAt = new Date().toISOString();
+      return DB.putItem(i, null);
+    });
+    var old = S.tags.find(function (t) { return t.name === from; });
+    Promise.all(writes)
+      .then(function () { return DB.delTag(from); })
+      .then(function () {
+        if (!to) return;
+        var ex = S.tags.find(function (t) { return t.name === to; });
+        return DB.putTag({
+          name: to,
+          count: (ex ? ex.count || 0 : 0) + (old ? old.count || 0 : 0),
+          lastUsed: new Date().toISOString()
+        });
+      })
+      .then(reload).then(function () { openTagMan(); render(); });
+  }
+
+  /* ================= 書き出し / 読み込み ================= */
+  function exportZip() {
+    toast('書き出しています…', null);
+    var enc = new TextEncoder();
+    var metaItems = [];
+    var jobs = S.items.map(function (i) {
+      return DB.getBlob(i.id).then(function (b) {
+        var ext = (i.name && i.name.indexOf('.') > 0) ? i.name.slice(i.name.lastIndexOf('.') + 1)
+                : (i.mime || '').split('/')[1] || 'bin';
+        var fn = 'images/' + i.id + '.' + ext.toLowerCase().replace(/[^a-z0-9]/g, '');
+        metaItems.push({
+          id: i.id, file: fn, folder: (S.folders.find(function (f) { return f.id === i.folderId; }) || {}).name || '未分類',
+          tags: i.tags || [], memo: i.memo || '', date: i.date || '', url: i.url || '',
+          createdAt: i.createdAt, updatedAt: i.updatedAt, mime: i.mime, name: i.name, hash: i.hash
+        });
+        return b ? b.arrayBuffer().then(function (ab) { return { name: fn, data: new Uint8Array(ab) }; }) : null;
+      });
+    });
+
+    Promise.all(jobs).then(function (files) {
+      var entries = files.filter(Boolean);
+      entries.unshift({
+        name: 'メタ.json',
+        data: enc.encode(JSON.stringify({
+          形式: 'photomemo/1',
+          書き出し: new Date().toISOString(),
+          フォルダ: S.folders.map(function (f) { return { name: f.name, order: f.order }; }),
+          タグ: S.tags.map(function (t) { return { name: t.name, count: t.count || 0 }; }),
+          項目: metaItems
+        }, null, 2))
+      });
+      var blob = LIB.zipWrite(entries);
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'photomemo_' + today() + '.zip';
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+      toast(entries.length - 1 + ' 枚 書き出し', null);
+    }).catch(function (e) { toast('書き出せませんでした: ' + (e && e.message), null); });
+  }
+
+  function importZip(file) {
+    toast('読み込んでいます…', null);
+    file.arrayBuffer().then(function (buf) {
+      var entries = LIB.zipRead(buf), byName = {};
+      entries.forEach(function (e) { byName[e.name] = e.data; });
+      var metaRaw = byName['メタ.json'];
+      if (!metaRaw) throw new Error('メタ.json がありません');
+      var meta = JSON.parse(new TextDecoder().decode(metaRaw));
+
+      // フォルダは名前で引き当て、無ければ作る
+      var fmap = {}, now = new Date().toISOString(), newFolders = [];
+      S.folders.forEach(function (f) { fmap[f.name] = f.id; });
+      (meta.フォルダ || []).forEach(function (f, i) {
+        if (!fmap[f.name]) {
+          var id = uid();
+          fmap[f.name] = id;
+          newFolders.push({ id: id, name: f.name, order: (S.folders.length + i), createdAt: now });
+        }
+      });
+
+      var items = [], blobs = [], tagset = {};
+      var work = (meta.項目 || []).map(function (m) {
+        var data = byName[m.file];
+        if (!data) return Promise.resolve();
+        var blob = new Blob([data], { type: m.mime || 'application/octet-stream' });
+        (m.tags || []).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
+        // サムネは zip に入れていないので、ここで作り直す
+        return LIB.makeThumb(blob).then(function (t) {
+          var id = m.id || uid();
+          items.push({
+            id: id, folderId: fmap[m.folder] || (S.folders[0] && S.folders[0].id),
+            tags: m.tags || [], memo: m.memo || '', date: m.date || today(), url: m.url || '',
+            createdAt: m.createdAt || now, updatedAt: now,
+            mime: m.mime || blob.type, name: m.name || '', hash: m.hash || '',
+            w: t.w, h: t.h, thumb: t.thumb
+          });
+          blobs.push({ id: id, blob: blob });
+        });
+      });
+
+      return Promise.all(work).then(function () {
+        var tags = Object.keys(tagset).map(function (n) {
+          var ex = S.tags.find(function (t) { return t.name === n; });
+          return { name: n, count: (ex ? ex.count || 0 : 0) + tagset[n], lastUsed: now };
+        });
+        return DB.bulkPut(items, blobs, newFolders, tags);
+      }).then(reload).then(function () {
+        render();
+        同期を予約();
+        toast(items.length + ' 枚 読み込み', null);
+      });
+    }).catch(function (e) { toast('読み込めませんでした: ' + (e && e.message), null); });
+  }
+
+  /* ================= ダミー（実データを入れないための代わり） ================= */
+  function makeDummies() {
+    var words = ['海', '看板', 'レシピ', '棚', '手元'];
+    var jobs = words.map(function (w, i) {
+      var c = document.createElement('canvas');
+      c.width = 900; c.height = 1200;
+      var x = c.getContext('2d');
+      x.fillStyle = 'hsl(' + (i * 67 + 20) + ' 45% 42%)';
+      x.fillRect(0, 0, 900, 1200);
+      x.fillStyle = 'rgba(255,255,255,.92)';
+      x.font = 'bold 110px sans-serif';
+      x.textAlign = 'center';
+      x.fillText('ダミー', 450, 560);
+      x.font = 'bold 150px sans-serif';
+      x.fillText(w, 450, 730);
+      x.font = '44px sans-serif';
+      x.fillText('実データではありません', 450, 830);
+      return new Promise(function (res) {
+        c.toBlob(function (b) {
+          var f = new File([b], 'ダミー_' + w + '.jpg', { type: 'image/jpeg', lastModified: Date.now() - i * 86400000 * 9 });
+          res(f);
+        }, 'image/jpeg', 0.9);
+      });
+    });
+    Promise.all(jobs).then(intake);
+  }
+
+  /* ================= 同期 ================= */
+
+  function 同期を予約() {
+    SYNC.あとで(function () { 同期する(true); });
+  }
+
+  /** 静かに(黙って)回すか、押されて回すか。 */
+  function 同期する(静かに) {
+    if (!SYNC.使える()) {
+      if (!静かに) toast('同期先が設定されていません', null);
+      return Promise.resolve();
+    }
+    if (!静かに) toast('同期しています…', null);
+    return SYNC.回す(S.items, S.folders).then(function (r) {
+      if (r && r.skipped) return;
+      return reload().then(function () {
+        render();
+        if (!静かに) {
+          toast('同期しました（送信 ' + (r.pushed || 0) + ' / 受信 ' + (r.pulled || 0) + '）', null);
+        }
+      });
+    }).catch(function (e) {
+      // 背景の失敗で保存を無かったことにはしない。黙って次の機会に送る。
+      if (!静かに) toast('同期できませんでした: ' + (e && e.message), null);
+    });
+  }
+
+  function 同期の状態を書く() {
+    var el = document.getElementById('sync-line');
+    if (!el) return;
+    if (!SYNC.使える()) { el.textContent = '未設定'; return; }
+    DB.allGraves().then(function (graves) {
+      var 待ち = SYNC.待ち件数(S.items, graves);
+      var 直近 = SYNC.直近();
+      el.textContent = 待ち ? ('未送信 ' + 待ち + ' 件')
+        : (直近.error ? '前回失敗' : (直近.at ? '同期済み' : '待機中'));
+    }).catch(function () {});
+  }
+
+  function 同期設定を開く() {
+    var c = SYNC.設定();
+    $('#sync-url').value = c.url;
+    $('#sync-token').value = c.token;
+    var 直近 = SYNC.直近();
+    $('#sync-status').textContent = 直近.error ? ('前回: ' + 直近.error)
+      : (直近.at ? ('前回: ' + 直近.at.replace('T', ' ').slice(0, 16) + ' に同期') : '');
+    $('#syncset').showModal();
+  }
+
+  /* ================= 配線 ================= */
+  function wire() {
+    $('#warn-close').onclick = function () {
+      $('#sandbox-warn').hidden = true;
+      sessionStorage.setItem('warn-dismissed', '1');
+    };
+
+    $('#fab-pick').onclick = function () { $('#file-pick').click(); };
+    $('#fab-cam').onclick = function () { $('#file-cam').click(); };
+    $('#file-pick').onchange = function (e) { intake(e.target.files); e.target.value = ''; };
+    $('#file-cam').onchange = function (e) { intake(e.target.files); e.target.value = ''; };
+
+    $('#btn-back').onclick = function () {
+      S.view = 'folders'; S.folderId = null;
+      $('#searchbar').hidden = true; $('#q').value = '';
+      render();
+    };
+
+    $('#btn-search').onclick = function () {
+      $('#searchbar').hidden = false;
+      S.view = 'search';
+      $('#q').focus();
+      render();
+    };
+    $('#btn-search-close').onclick = function () {
+      $('#searchbar').hidden = true; $('#q').value = '';
+      S.view = S.folderId ? 'grid' : 'folders';
+      render();
+    };
+    $('#q').oninput = function () { S.view = 'search'; render(); };
+
+    // --- モーダル ---
+    $('#m-cancel').onclick = function () { $('#modal').close(); };
+    // 既定は小さく出す（日付・URL まで一目に入れる）。読みたいときだけ押して伸ばす。
+    $('#m-preview').onclick = function () { this.classList.toggle('big'); };
+    $('#m-save').onclick = save;
+    $('#m-del').onclick = removeCurrent;
+    $('#m-newtag-add').onclick = addNewTag;
+    $('#m-newtag').onkeydown = function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); addNewTag(); }
+    };
+    $('#m-paste').onclick = function () {
+      if (!navigator.clipboard || !navigator.clipboard.readText) { toast('この環境では貼付できません', null); return; }
+      navigator.clipboard.readText().then(function (t) {
+        var m = String(t).match(/https?:\/\/\S+/);
+        if (m) $('#m-url').value = m[0]; else toast('クリップボードに URL がありません', null);
+      }).catch(function () { toast('クリップボードを読めません', null); });
+    };
+    $('#modal').addEventListener('close', function () { M.drafts = []; });
+    // Esc で閉じても保存済みのものは消えない。新規なら破棄でよい。
+    $('#modal').addEventListener('cancel', function () { /* 既定の挙動のまま */ });
+
+    // --- メニュー ---
+    $('#btn-menu').onclick = function () { 同期の状態を書く(); $('#sheet').showModal(); };
+    $('#sheet').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-act]');
+      if (!b) return;
+      var a = b.dataset.act;
+      $('#sheet').close();
+      if (a === 'folders') openFolderMan();
+      else if (a === 'tags') openTagMan();
+      else if (a === 'syncnow') 同期する(false);
+      else if (a === 'syncset') 同期設定を開く();
+      else if (a === 'export') exportZip();
+      else if (a === 'import') $('#file-zip').click();
+      else if (a === 'dummy') makeDummies();
+      else if (a === 'wipe') {
+        if (confirm('この端末のブラウザに入っているものを全部消します。取り消せません。')) {
+          DB.wipe().then(seedFolders).then(reload).then(function () {
+            S.view = 'folders'; S.folderId = null; render(); toast('全部消しました', null);
+          });
+        }
+      }
+    });
+    $('#file-zip').onchange = function (e) {
+      if (e.target.files[0]) importZip(e.target.files[0]);
+      e.target.value = '';
+    };
+
+    Array.prototype.forEach.call(document.querySelectorAll('dialog .close'), function (b) {
+      b.onclick = function () { b.closest('dialog').close(); };
+    });
+
+    $('#newfolder-add').onclick = function () {
+      var i = $('#newfolder'), n = i.value.trim();
+      if (!n) return;
+      i.value = '';
+      DB.putFolder({ id: uid(), name: n, order: S.folders.length, createdAt: new Date().toISOString() })
+        .then(reload).then(function () { openFolderMan(); render(); });
+    };
+
+    $('#sync-save').onclick = function () {
+      var u = $('#sync-url').value.trim(), t = $('#sync-token').value.trim();
+      if (!SYNC.設定を保存(u, t)) { $('#sync-status').textContent = 'この端末に設定を保存できません'; return; }
+      $('#syncset').close();
+      toast(u && t ? '同期先を設定しました' : '同期を止めました', null);
+      if (u && t) 同期する(false);
+    };
+
+    $('#sync-test').onclick = function () {
+      var u = $('#sync-url').value.trim(), t = $('#sync-token').value.trim();
+      if (!u || !t) { $('#sync-status').textContent = 'URL と合言葉の両方が要ります'; return; }
+      var 元 = SYNC.設定();
+      SYNC.設定を保存(u, t);
+      $('#sync-status').textContent = '試しています…';
+      SYNC.呼ぶ('ping').then(function () {
+        $('#sync-status').textContent = '繋がりました。保存を押すと有効になります。';
+      }).catch(function (e) {
+        SYNC.設定を保存(元.url, 元.token);
+        $('#sync-status').textContent = '繋がりません: ' + ((e && e.message) || e);
+      });
+    };
+
+    $('#toast-undo').onclick = function () {
+      var f = S.undo; S.undo = null; $('#toast').hidden = true;
+      if (f) f();
+    };
+  }
+
+  g.APP = { S: S, M: M, boot: boot, reload: reload, render: render, intake: intake,
+            同期する: 同期する, 消す: 消す };
+  document.addEventListener('DOMContentLoaded', boot);
+})(window);

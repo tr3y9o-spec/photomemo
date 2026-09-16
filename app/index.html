@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<title>写真メモ</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="sandbox-warn" hidden>
+  <span>試作システム上の試作品。<b>本物の写真を入れないこと。</b>ブラウザのデータ削除で全部消えます。</span>
+  <button type="button" id="warn-close" aria-label="閉じる">×</button>
+</div>
+
+<header id="appbar">
+  <button type="button" id="btn-back" class="icon" aria-label="戻る" hidden>‹</button>
+  <h1 id="title">フォルダ</h1>
+  <button type="button" id="btn-search" class="icon" aria-label="検索">⌕</button>
+  <button type="button" id="btn-menu" class="icon" aria-label="メニュー">☰</button>
+</header>
+
+<div id="searchbar" hidden>
+  <input type="search" id="q" placeholder="メモ・タグ・URL・フォルダ名" autocomplete="off">
+  <button type="button" id="btn-search-close" class="icon" aria-label="検索を閉じる">×</button>
+</div>
+
+<main id="main">
+  <section id="view-folders" class="view"></section>
+  <section id="view-grid" class="view" hidden></section>
+</main>
+
+<div id="fab">
+  <button type="button" id="fab-cam" class="fab-btn" aria-label="カメラで撮る">
+    <span class="fab-ico">◉</span><span class="fab-label">カメラ</span>
+  </button>
+  <button type="button" id="fab-pick" class="fab-btn primary" aria-label="写真から選ぶ">
+    <span class="fab-ico">＋</span><span class="fab-label">写真から</span>
+  </button>
+</div>
+
+<input type="file" id="file-pick" accept="image/*" multiple hidden>
+<input type="file" id="file-cam" accept="image/*" capture="environment" hidden>
+
+<!-- ============ 保存／編集モーダル ============ -->
+<dialog id="modal">
+  <form method="dialog" id="modal-form">
+    <header class="m-head">
+      <button type="button" id="m-cancel" class="icon" aria-label="やめる">×</button>
+      <span id="m-count"></span>
+      <button type="button" id="m-del" class="icon danger" aria-label="削除" hidden>🗑</button>
+    </header>
+
+    <div class="m-body">
+      <div id="m-preview"></div>
+      <div id="m-strip" class="strip" hidden></div>
+      <p id="m-dup" class="dup" hidden></p>
+
+      <div class="field">
+        <label class="lab">保存先フォルダ<small id="m-scope-all">全部に</small></label>
+        <div id="m-folders" class="chips seg"></div>
+      </div>
+
+      <div class="field">
+        <label class="lab">タグ<small id="m-scope-all2">全部に</small></label>
+        <div id="m-tags" class="chips"></div>
+        <div class="tagadd">
+          <input type="text" id="m-newtag" placeholder="新しいタグ" autocomplete="off" enterkeyhint="done">
+          <button type="button" id="m-newtag-add">追加</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="lab" for="m-memo">メモ<small class="one">この1枚に</small></label>
+        <textarea id="m-memo" rows="2" placeholder="任意。あとから書いてもいい"></textarea>
+      </div>
+
+      <div class="field">
+        <label class="lab" for="m-date">日付<small class="one">この1枚に</small><small id="m-date-src" class="src"></small></label>
+        <input type="date" id="m-date">
+      </div>
+
+      <div class="field">
+        <label class="lab" for="m-url">URL<small class="one">この1枚に</small></label>
+        <div class="urlrow">
+          <input type="url" id="m-url" placeholder="https://" autocomplete="off" inputmode="url">
+          <button type="button" id="m-paste">貼付</button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="m-foot">
+      <button type="button" id="m-save" class="save">保存</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ============ メニュー ============ -->
+<dialog id="sheet">
+  <div class="sheet-body">
+    <button type="button" data-act="folders">フォルダを整理</button>
+    <button type="button" data-act="tags">タグを整理</button>
+    <hr>
+    <button type="button" data-act="syncnow">今すぐ同期<small id="sync-line"></small></button>
+    <button type="button" data-act="syncset">同期の設定</button>
+    <hr>
+    <button type="button" data-act="export">書き出す（zip）</button>
+    <button type="button" data-act="import">読み込む（zip）</button>
+    <hr>
+    <button type="button" data-act="dummy">ダミー画像を5枚入れる</button>
+    <button type="button" data-act="wipe" class="danger">全部消す</button>
+    <hr>
+    <button type="button" data-act="close" class="plain">閉じる</button>
+  </div>
+</dialog>
+<input type="file" id="file-zip" accept=".zip,application/zip" hidden>
+
+<!-- ============ 同期の設定 ============ -->
+<dialog id="syncset">
+  <header class="m-head"><button type="button" class="icon close">×</button><span>同期の設定</span><span></span></header>
+  <div class="m-body">
+    <p class="hint">メモ・日付・URL・タグ・フォルダ名だけを送ります。<b>画像は送りません。</b><br>
+      合言葉はこの端末にだけ置かれ、コードにも履歴にも残りません。</p>
+    <div class="field">
+      <label class="lab" for="sync-url">GAS の /exec URL</label>
+      <input type="url" id="sync-url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    </div>
+    <div class="field">
+      <label class="lab" for="sync-token">合言葉（スクリプト プロパティの TOKEN）</label>
+      <input type="password" id="sync-token" autocomplete="off">
+    </div>
+    <p id="sync-status" class="hint"></p>
+  </div>
+  <footer class="m-foot">
+    <div class="urlrow">
+      <button type="button" id="sync-test">接続を試す</button>
+      <button type="button" id="sync-save" class="save" style="min-height:44px">保存</button>
+    </div>
+  </footer>
+</dialog>
+
+<!-- ============ フォルダ整理 ============ -->
+<dialog id="folderman">
+  <header class="m-head"><button type="button" class="icon close">×</button><span>フォルダ</span><span></span></header>
+  <div class="m-body" id="folderman-list"></div>
+  <footer class="m-foot">
+    <div class="urlrow">
+      <input type="text" id="newfolder" placeholder="フォルダ名" autocomplete="off">
+      <button type="button" id="newfolder-add">追加</button>
+    </div>
+  </footer>
+</dialog>
+
+<!-- ============ タグ整理 ============ -->
+<dialog id="tagman">
+  <header class="m-head"><button type="button" class="icon close">×</button><span>タグ</span><span></span></header>
+  <div class="m-body" id="tagman-list"></div>
+  <footer class="m-foot"><small class="hint">名前を書き換えると改名。既にある名前にすると統合。</small></footer>
+</dialog>
+
+<div id="toast" hidden><span id="toast-msg"></span><button type="button" id="toast-undo">取り消す</button></div>
+
+<script src="lib.js"></script>
+<script src="db.js"></script>
+<script src="sync.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

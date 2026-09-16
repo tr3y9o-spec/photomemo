@@ -1,0 +1,47 @@
+# app\ を GitHub Pages へ出す。
+#
+# 出るのは app/ の中身だけ。CLAUDE.md や仕様書、gas/ は含まれない。
+#
+# 【動かす前に必要なこと】
+#   Settings → Pages → Source を "GitHub Actions" にする。
+#   これをしないと configure-pages が失敗する。
+#   ※ private リポジトリで Pages を使うには有料プラン（Pro 以上）が要る。
+#     public なら無料。このリポジトリに入っているのはアプリのコードだけなので、
+#     public にしても困らない設計にしてある（CLAUDE.md §5）。
+#
+# まず Actions タブから手で実行する（Run workflow）。
+# 出るのを確かめたら、push のたびに出したければ on: の下に次を足す:
+#
+#   push:
+#     branches: [main]
+#     paths: ['app/**', '.github/workflows/pages.yml']
+#
+# ※ Pages を有効にする前に push トリガーを足すと、push のたびに赤くなる。
+name: 写真メモを Pages へ
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app
+      - id: deploy
+        uses: actions/deploy-pages@v4
