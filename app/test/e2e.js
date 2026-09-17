@@ -229,7 +229,9 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.click('button[data-act="tags"]');
     await page.waitForSelector('#tagman[open]');
     const before = await N(page,'#tagman-list .mrow');
-    const keep = await page.locator('#tagman-list input').first().inputValue();
+    // 回数も時刻も同じタグは名前順で並ぶ。名前順はブラウザの言語で変わる
+    // （ja では 海辺→仕事、en では 仕事→海辺）ので、残る名前は決め打ちしない
+    const keep =await page.locator('#tagman-list input').first().inputValue();
     await page.locator('#tagman-list input').nth(1).fill(keep);
     await page.locator('#tagman-list input').first().click();
     await page.waitForTimeout(1200);
@@ -283,7 +285,7 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('既存の全件が送られる', 送られた.length === 5, 'rows=' + 送られた.length);
     check('メモが行に載る', 送られた.some(r => r.memo === 'あとから書き足した'),
           JSON.stringify(送られた.map(r => r.memo)));
-    check('タグが行に載る', 送られた.every(r => r.tags === '仕事'),
+    check('タグが行に載る', 送られた.every(r => r.tags === keep),
           JSON.stringify(送られた.map(r => r.tags)));
     check('フォルダ名が行に載る', 送られた.every(r => r.folder === '資料'),
           JSON.stringify([...new Set(送られた.map(r => r.folder))]));
@@ -343,7 +345,7 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('引き直した分は画像待ちになる', 戻り.waiting === 戻り.n, 'waiting=' + 戻り.waiting);
     check('メモの中身がそのまま戻る', 戻り.memos.includes('さんまいめのメモ'),
           JSON.stringify(戻り.memos));
-    check('タグも戻る', JSON.stringify(戻り.tags) === '["仕事"]', JSON.stringify(戻り.tags));
+    check('タグも戻る', JSON.stringify(戻り.tags) === JSON.stringify([keep]), JSON.stringify(戻り.tags));
     check('フォルダ名から作り直される', 戻り.folders.includes('資料'), JSON.stringify(戻り.folders));
     check('削除したものは戻ってこない', !戻り.ids.includes(消すid));
     await page.waitForTimeout(300);
