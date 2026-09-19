@@ -866,7 +866,20 @@
       var items = [], blobs = [], tagset = {};
       var work = (meta.項目 || []).map(function (m) {
         var data = byName[m.file];
-        if (!data) return Promise.resolve();
+        if (!data) {
+          // 画像の無い項目＝「画像待ち」。メモだけが残っている、一番取り返しのつかない記録なので
+          // 飛ばさずに戻す。あとで同じ写真を選び直せば、ハッシュ一致で結び付く（§8）
+          (m.tags || []).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
+          items.push({
+            id: m.id || uid(), folderId: fmap[m.folder] || (S.folders[0] && S.folders[0].id),
+            tags: m.tags || [], memo: m.memo || '', date: m.date || today(), url: m.url || '',
+            createdAt: m.createdAt || now, updatedAt: now,
+            mime: m.mime || '', name: m.name || '', hash: m.hash || '',
+            tasting: 中身あり(m.tasting) ? m.tasting : undefined,
+            w: 0, h: 0, thumb: null, waiting: true
+          });
+          return Promise.resolve();
+        }
         var blob = new Blob([data], { type: m.mime || 'application/octet-stream' });
         (m.tags || []).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
         // サムネは zip に入れていないので、ここで作り直す

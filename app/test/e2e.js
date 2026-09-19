@@ -274,6 +274,20 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('シートの言葉で検索できる', await N(page,'.tile') === 1, String(await N(page,'.tile')));  // 洋梨は1枚だけ
     await page.click('#btn-search-close'); await page.waitForTimeout(300);
 
+    // 画像だけ失った記録を1件作る（同期で引き直した直後と同じ形）
+    await page.evaluate(async () => {
+      const src = APP.S.items[APP.S.items.length - 1];
+      await DB.putItem({
+        id: 'waiting-test', folderId: src.folderId, tags: [], memo: '画像を無くしたメモ',
+        date: src.date, url: '', createdAt: src.createdAt,
+        updatedAt: new Date().toISOString(), mime: 'image/jpeg', name: 'なくした.jpg',
+        hash: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+        w: 0, h: 0, thumb: null, waiting: true
+      }, null);
+      await APP.reload(); APP.render();
+    });
+    await page.waitForTimeout(300);
+
     /* --- 書き出し --- */
     const dl = page.waitForEvent('download', { timeout: 20000 });
     await page.click('#btn-menu');
@@ -314,11 +328,21 @@ const N = async (p, sel) => await p.locator(sel).count();
       url: APP.S.items.filter(i => i.url).length,
       folder: APP.S.folders.length
     }));
-    check('読み込みで枚数が戻る', r.n === 5, 'items=' + r.n);
+    check('読み込みで件数が戻る（画像5枚＋画像待ち1件）', r.n === 6, 'items=' + r.n);
     check('読み込みでタグが戻る', Array.isArray(r.tags) && r.tags.length === 2, JSON.stringify(r.tags));
-    check('読み込みでメモが戻る', r.memo === 2, 'memo=' + r.memo);
+    check('読み込みでメモが戻る（画像待ちの分を含む）', r.memo === 3, 'memo=' + r.memo);
     check('読み込みでURLが戻る', r.url === 1, 'url=' + r.url);
-    check('読み込みでサムネが作り直される', r.thumb === r.n, 'thumb=' + r.thumb);
+    check('読み込みでサムネが作り直される（画像のある5件）', r.thumb === 5, 'thumb=' + r.thumb);
+    check('画像待ちも zip から戻る（メモだけの記録を落とさない）', await page.evaluate(() => {
+      const w = APP.S.items.filter(i => i.waiting);
+      return w.length === 1 && w[0].memo === '画像を無くしたメモ' && !!w[0].hash;
+    }));
+    // 以降の検査は5枚を前提にしているので、確認用の1件はここで取り除く（墓標は立てない）
+    await page.evaluate(async () => {
+      await DB.delItem('waiting-test', false);
+      await APP.reload(); APP.render();
+    });
+    await page.waitForTimeout(300);
     const t1 = await page.evaluate(() =>
       (APP.S.items.find(i => i.tasting && (i.tasting.香り || []).includes('洋梨')) || {}).tasting || null);
     check('読み込みでシートが戻る',
