@@ -158,7 +158,7 @@
       d.innerHTML =
         '<div class="fcover">' + (cover ? '<img alt="" src="' + url(cover.thumb) + '">' : '<span class="fempty">—</span>') + '</div>' +
         '<div class="fname">' + esc(f.name) + '</div>' +
-        '<div class="fcount">' + n + '</div>';
+        '<div class="fcount">' + n + ' 枚</div>';
       d.onclick = function () { S.folderId = f.id; S.view = 'grid'; render(); };
       v.appendChild(d);
     });

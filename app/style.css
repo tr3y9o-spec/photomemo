@@ -1,17 +1,20 @@
 /* style.css — 片手・親指・屋外。タップ対象は 44px 以上。
    「保存」は常に見える位置に固定する（キーボードが出ても隠れない）。 */
 
+/* 色は「紙と墨」。写真が主役なので、地は少し温かい紙色にして彩度を持たない。
+   色が付くのは、選んだもの・押すもの・危ないものだけ。 */
 :root {
-  --bg: #f6f7f9; --card: #fff; --fg: #15181d; --dim: #666f7a;
-  --line: #e2e5ea; --accent: #2f6df6; --accent-fg: #fff;
-  --warn: #8a5a00; --warn-bg: #fff4d6; --danger: #c0392b;
+  color-scheme: light dark;   /* 宣言しないとブラウザに勝手に暗くされる */
+  --bg: #f7f4ef; --card: #fffdfa; --fg: #1f1b17; --dim: #6f665c;
+  --line: #e6ded2; --accent: #a9502b; --accent-fg: #fff;
+  --warn: #7a5310; --warn-bg: #fbf0d9; --danger: #b23b2e;
   --r: 14px; --safe-b: env(safe-area-inset-bottom, 0px);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111318; --card: #1a1d23; --fg: #e9ecf1; --dim: #97a0ad;
-    --line: #2a2f38; --accent: #5b8dff; --accent-fg: #0b0d11;
-    --warn: #ffd98a; --warn-bg: #3a2f12; --danger: #ff6b5c;
+    --bg: #16130f; --card: #201c17; --fg: #ece6dd; --dim: #a79c8e;
+    --line: #342c23; --accent: #e08258; --accent-fg: #1a120c;
+    --warn: #f0cf93; --warn-bg: #3a2d12; --danger: #ff7a66;
   }
 }
 
@@ -33,9 +36,9 @@ code { font-size: .82em; word-break: break-all; }
 
 /* ---------- 注意帯 ---------- */
 #sandbox-warn {
-  display: flex; gap: 8px; align-items: flex-start;
+  display: flex; gap: 8px; align-items: center;
   background: var(--warn-bg); color: var(--warn);
-  padding: 10px 12px; font-size: .82rem; line-height: 1.45;
+  padding: 7px 12px; font-size: .78rem; line-height: 1.4;
 }
 #sandbox-warn button {
   margin-left: auto; background: none; border: 0; color: inherit;
@@ -79,29 +82,31 @@ code { font-size: .82em; word-break: break-all; }
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
 }
 .folder:active { transform: scale(.985); }
-.fcover { aspect-ratio: 4/3; background: var(--bg); display: grid; place-items: center; }
-.fcover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fcover { aspect-ratio: 3/2; background: var(--bg); display: grid; place-items: center;
+  overflow: hidden; }
+/* min-height:auto のままだと、縦長の写真が比率を押し広げてカードの丈が揃わない */
+.fcover img { width: 100%; height: 100%; min-height: 0; object-fit: cover; display: block; }
 .fempty { color: var(--dim); font-size: 1.4rem; }
-.fname { padding: 9px 12px 0; font-weight: 600; font-size: .95rem; }
-.fcount { padding: 0 12px 10px; color: var(--dim); font-size: .8rem; }
+.fname { padding: 9px 12px 0; font-weight: 700; font-size: .95rem; }
+.fcount { padding: 1px 12px 10px; color: var(--dim); font-size: .78rem; }
 
 /* ---------- 画像グリッド ---------- */
 #view-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; }
 @media (min-width: 620px) { #view-grid { grid-template-columns: repeat(5, 1fr); } }
 .tile {
   position: relative; aspect-ratio: 1; padding: 0; overflow: hidden;
-  border: 0; border-radius: 4px; background: var(--card);
+  border: 0; border-radius: 6px; background: var(--card);
 }
 .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tile:active { opacity: .75; }
 .noimg { display: grid; place-items: center; height: 100%; padding: 6px;
   font-size: .62rem; color: var(--dim); text-align: center; }
 .badges { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; }
-.b { background: rgba(0,0,0,.55); color: #fff; border-radius: 999px;
+.b { background: rgba(26,19,13,.62); color: #fff; border-radius: 999px;
   font-size: .62rem; line-height: 1; padding: 3px 5px; }
 .tdate { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 4px 3px;
   font-size: .58rem; color: #fff; text-align: right;
-  background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  background: linear-gradient(transparent, rgba(26,19,13,.62)); }
 .empty { grid-column: 1/-1; padding: 48px 16px; text-align: center; color: var(--dim); }
 
 /* ---------- 足すボタン ---------- */
@@ -115,7 +120,7 @@ code { font-size: .82em; word-break: break-all; }
   align-items: center; justify-content: center;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); font-weight: 600;
-  box-shadow: 0 3px 14px rgba(0,0,0,.14);
+  box-shadow: 0 2px 10px rgba(60,40,20,.13);
 }
 .fab-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 .fab-btn:active { transform: translateY(1px); }
@@ -169,9 +174,9 @@ dialog form, .sheet-body { display: flex; flex-direction: column; max-height: 92
   background: var(--warn-bg); color: var(--warn); font-size: .78rem; }
 
 .field { margin-top: 10px; }
-.lab { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;
-  font-size: .82rem; font-weight: 600; color: var(--dim); }
-.lab small { font-weight: 400; font-size: .72rem; padding: 1px 7px;
+.lab { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; flex-wrap: wrap;
+  font-size: .8rem; font-weight: 700; color: var(--fg); }
+.lab small { font-weight: 400; font-size: .72rem; padding: 1px 7px; color: var(--dim);
   border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -226,11 +231,11 @@ dialog form, .sheet-body { display: flex; flex-direction: column; max-height: 92
   position: fixed; left: 12px; right: 12px; bottom: calc(78px + var(--safe-b)); z-index: 40;
   display: flex; align-items: center; gap: 10px;
   padding: 11px 14px; border-radius: 12px;
-  background: #22262e; color: #f2f4f8; font-size: .88rem;
-  box-shadow: 0 6px 22px rgba(0,0,0,.3);
+  background: #2b231b; color: #f6f1ea; font-size: .88rem;
+  box-shadow: 0 6px 22px rgba(40,26,14,.32);
 }
 #toast button { margin-left: auto; background: none; border: 0;
-  color: #8fb4ff; font-weight: 700; padding: 6px 2px; }
+  color: #ffb089; font-weight: 700; padding: 6px 2px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
