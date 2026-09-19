@@ -69,7 +69,9 @@
       mime: item.mime || '',
       createdAt: item.createdAt || '',
       updatedAt: item.updatedAt || '',
-      deletedAt: ''
+      deletedAt: '',
+      tasting: (item.tasting && Object.keys(item.tasting).length)
+        ? JSON.stringify(item.tasting) : ''
     };
   }
 
@@ -93,7 +95,7 @@
       graves.forEach(function (gr) {
         rows.push({ id: gr.id, folder: '', tags: '', memo: '', date: '', url: '',
                     hash: '', name: '', mime: '', createdAt: '', updatedAt: gr.deletedAt,
-                    deletedAt: gr.deletedAt });
+                    deletedAt: gr.deletedAt, tasting: '' });
       });
       if (!rows.length) return { pushed: 0 };
 
@@ -144,6 +146,10 @@
         if (!fid) fid = (folders[0] && folders[0].id);
 
         var tags = r.tags ? String(r.tags).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+        var tasting = null;
+        if (r.tasting) {
+          try { tasting = JSON.parse(r.tasting); } catch (e) { tasting = null; }
+        }
 
         if (手元の) {
           // 新しいほうを採る
@@ -151,6 +157,7 @@
           手元の.folderId = fid; 手元の.tags = tags;
           手元の.memo = r.memo || ''; 手元の.date = r.date || 手元の.date;
           手元の.url = r.url || ''; 手元の.updatedAt = r.updatedAt || now;
+          if (tasting) 手元の.tasting = tasting; else delete 手元の.tasting;
           手元の.syncedAt = res.serverTime || now;
           作業.push(DB.putItem(手元の, null));
           増えた++;
@@ -162,6 +169,7 @@
             createdAt: r.createdAt || now, updatedAt: r.updatedAt || now,
             syncedAt: res.serverTime || now,
             mime: r.mime || '', name: r.name || '', hash: r.hash || '',
+            tasting: tasting || undefined,
             w: 0, h: 0, thumb: null, waiting: true
           }, null));
           増えた++;

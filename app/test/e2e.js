@@ -173,6 +173,21 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.click('#btn-search-close'); await page.waitForTimeout(400);
     check('検索バーを閉じられる', !(await page.locator('#searchbar').isVisible()));
 
+    /* --- テイスティングシート（器だけ。画面はまだ無いので直接書く） --- */
+    await page.evaluate(async () => {
+      // 1枚目は後で削除の検査に使われるので、最後まで残る「さんまいめ」に書く
+      const it = APP.S.items.find(i => i.memo === 'さんまいめのメモ');
+      it.tasting = { 色: 'ルビー', 香り: ['洋梨', '樽'], 余韻: '長い', 評価: 4 };
+      it.updatedAt = new Date().toISOString();
+      await DB.putItem(it, null);
+      await APP.reload(); APP.render();
+    });
+    await page.waitForTimeout(400);
+    await page.click('#btn-search');
+    await page.fill('#q', '洋梨'); await page.waitForTimeout(400);
+    check('シートの言葉で検索できる', await N(page,'.tile') === 1, String(await N(page,'.tile')));
+    await page.click('#btn-search-close'); await page.waitForTimeout(300);
+
     /* --- 書き出し --- */
     const dl = page.waitForEvent('download', { timeout: 20000 });
     await page.click('#btn-menu');
@@ -186,6 +201,13 @@ const N = async (p, sel) => await p.locator(sel).count();
       { encoding: 'utf-8' });
     check('zip が他のツールで開ける', unzip.status === 0, (unzip.stderr||'').split('\n')[0]);
     check('zip に6件（メタ+5枚）', (unzip.stdout||'').split('\n')[0].trim() === '6', (unzip.stdout||'').split('\n')[0]);
+
+    const metaTxt = require('child_process').spawnSync('python3',
+      ['-c', 'import zipfile,sys;print(zipfile.ZipFile(sys.argv[1]).read("メタ.json").decode())', zipPath],
+      { encoding: 'utf-8' });
+    check('zip のメタにシートが入る',
+      (metaTxt.stdout||'').includes('"tasting"') && (metaTxt.stdout||'').includes('洋梨'),
+      (metaTxt.stdout||'').includes('"tasting"') ? 'あり' : 'なし');
 
     /* --- 全消し → 読み込み（持ち出せることの確認） --- */
     await page.click('#btn-menu');
@@ -211,6 +233,10 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('読み込みでメモが戻る', r.memo === 2, 'memo=' + r.memo);
     check('読み込みでURLが戻る', r.url === 1, 'url=' + r.url);
     check('読み込みでサムネが作り直される', r.thumb === r.n, 'thumb=' + r.thumb);
+    const t1 = await page.evaluate(() => (APP.S.items.find(i => i.tasting) || {}).tasting || null);
+    check('読み込みでシートが戻る',
+      !!t1 && t1.色 === 'ルビー' && (t1.香り || []).includes('洋梨') && t1.評価 === 4,
+      JSON.stringify(t1));
     check('フォルダが増殖しない', r.folder === 5, 'folders=' + r.folder);
 
     /* --- フォルダ整理 --- */
@@ -289,6 +315,12 @@ const N = async (p, sel) => await p.locator(sel).count();
           JSON.stringify(送られた.map(r => r.tags)));
     check('フォルダ名が行に載る', 送られた.every(r => r.folder === '資料'),
           JSON.stringify([...new Set(送られた.map(r => r.folder))]));
+    const 味行 = 送られた.filter(r => r.tasting);
+    check('シートが行に載る（JSON 1列）', 味行.length === 1, '行=' + 味行.length);
+    check('行のシートが読み戻せる', (() => {
+      try { const o = JSON.parse(味行[0].tasting); return o.色 === 'ルビー' && o.香り[0] === '洋梨'; }
+      catch (e) { return false; }
+    })(), (味行[0] || {}).tasting);
     check('ハッシュが行に載る', 送られた.every(r => r.hash && r.hash.length > 8));
     check('画像は送っていない',
       送られた.every(r => !('blob' in r) && !('thumb' in r) && JSON.stringify(r).length < 2000));
@@ -343,6 +375,9 @@ const N = async (p, sel) => await p.locator(sel).count();
     }));
     check('消しても メモが引き直せる', 戻り.n === 4, 'items=' + 戻り.n);
     check('引き直した分は画像待ちになる', 戻り.waiting === 戻り.n, 'waiting=' + 戻り.waiting);
+    const t2 = await page.evaluate(() => (APP.S.items.find(i => i.tasting) || {}).tasting || null);
+    check('消してもシートが引き直せる',
+      !!t2 && t2.色 === 'ルビー' && (t2.香り || []).includes('洋梨'), JSON.stringify(t2));
     check('メモの中身がそのまま戻る', 戻り.memos.includes('さんまいめのメモ'),
           JSON.stringify(戻り.memos));
     check('タグも戻る', JSON.stringify(戻り.tags) === JSON.stringify([keep]), JSON.stringify(戻り.tags));

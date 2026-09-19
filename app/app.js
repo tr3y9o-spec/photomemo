@@ -216,8 +216,8 @@
     var fname = {};
     S.folders.forEach(function (f) { fname[f.id] = f.name.toLowerCase(); });
     return S.items.filter(function (i) {
-      var hay = [i.memo || '', i.url || '', (i.tags || []).join(' '), fname[i.folderId] || '', i.date || '']
-        .join(' ').toLowerCase();
+      var hay = [i.memo || '', i.url || '', (i.tags || []).join(' '), fname[i.folderId] || '', i.date || '',
+                 味の言葉(i)].join(' ').toLowerCase();
       return terms.every(function (t) { return hay.indexOf(t) >= 0; });
     });
   }
@@ -254,6 +254,7 @@
           dateSrc: 待ち ? 'メモから復元' : src,
           memo: 待ち ? (待ち.memo || '') : '',
           url: 待ち ? (待ち.url || '') : (S.pendingUrl || ''),
+          tasting: 待ち ? (待ち.tasting || null) : null,
           dup: false, 復元: 待ち || null
         };
       });
@@ -299,6 +300,7 @@
         id: item.id, blob: b, thumb: item.thumb, w: item.w, h: item.h,
         mime: item.mime, name: item.name, hash: item.hash,
         date: item.date, dateSrc: '', memo: item.memo || '', url: item.url || '',
+        tasting: item.tasting || null,
         dup: false, createdAt: item.createdAt
       }];
       paintModal();
@@ -439,6 +441,22 @@
     paintTags();
   }
 
+  /* シートに書いた言葉を平らにする。項目が増えても手を入れなくて済むよう、
+     鍵ではなく値だけを拾う。 */
+  function 味の言葉(item) {
+    var t = item && item.tasting;
+    if (!t) return '';
+    var out = [];
+    Object.keys(t).forEach(function (k) {
+      var v = t[k];
+      if (Array.isArray(v)) out.push(v.join(' '));
+      else if (v || v === 0) out.push(String(v));
+    });
+    return out.join(' ');
+  }
+
+  function 中身あり(t) { return !!(t && Object.keys(t).length); }
+
   /* ---- 保存。ここで聞き返さない。失敗しうる分岐を作らない。 ---- */
   function save() {
     stash();
@@ -453,6 +471,7 @@
         createdAt: d.createdAt || now, updatedAt: now,
         mime: d.mime, name: d.name, hash: d.hash, w: d.w, h: d.h, thumb: d.thumb
       };
+      if (中身あり(d.tasting)) item.tasting = d.tasting;
       return DB.putItem(item, d.blob);
     });
 
@@ -611,11 +630,13 @@
         var ext = (i.name && i.name.indexOf('.') > 0) ? i.name.slice(i.name.lastIndexOf('.') + 1)
                 : (i.mime || '').split('/')[1] || 'bin';
         var fn = 'images/' + i.id + '.' + ext.toLowerCase().replace(/[^a-z0-9]/g, '');
-        metaItems.push({
+        var meta1 = {
           id: i.id, file: fn, folder: (S.folders.find(function (f) { return f.id === i.folderId; }) || {}).name || '未分類',
           tags: i.tags || [], memo: i.memo || '', date: i.date || '', url: i.url || '',
           createdAt: i.createdAt, updatedAt: i.updatedAt, mime: i.mime, name: i.name, hash: i.hash
-        });
+        };
+        if (中身あり(i.tasting)) meta1.tasting = i.tasting;
+        metaItems.push(meta1);
         return b ? b.arrayBuffer().then(function (ab) { return { name: fn, data: new Uint8Array(ab) }; }) : null;
       });
     });
@@ -676,6 +697,7 @@
             tags: m.tags || [], memo: m.memo || '', date: m.date || today(), url: m.url || '',
             createdAt: m.createdAt || now, updatedAt: now,
             mime: m.mime || blob.type, name: m.name || '', hash: m.hash || '',
+            tasting: 中身あり(m.tasting) ? m.tasting : undefined,
             w: t.w, h: t.h, thumb: t.thumb
           });
           blobs.push({ id: id, blob: blob });

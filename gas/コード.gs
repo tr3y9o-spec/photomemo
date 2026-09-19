@@ -23,7 +23,8 @@
 
 var シート名 = 'photomemo';
 var 見出し = ['id', 'folder', 'tags', 'memo', 'date', 'url',
-              'hash', 'name', 'mime', 'createdAt', 'updatedAt', 'deletedAt'];
+              'hash', 'name', 'mime', 'createdAt', 'updatedAt', 'deletedAt',
+              'tasting'];
 
 /** 最初に1回だけ実行する。シートと見出しを用意する。 */
 function 準備() {
@@ -112,8 +113,24 @@ function シート_() {
     sh = ss.insertSheet(シート名);
     sh.getRange(1, 1, 1, 見出し.length).setValues([見出し]).setFontWeight('bold');
     sh.setFrozenRows(1);
+    return sh;
   }
+  見出しを揃える_(sh);
   return sh;
+}
+
+/** 列が増えたときのため。既にあるシートの見出しに、足りない列だけを書き足す。
+ *  既存の行はそのまま。並びは 見出し の順に合わせる。 */
+function 見出しを揃える_(sh) {
+  var 幅 = sh.getLastColumn();
+  var 今 = 幅 ? sh.getRange(1, 1, 1, 幅).getValues()[0] : [];
+  var 足りない = false;
+  for (var i = 0; i < 見出し.length; i++) {
+    if (String(今[i] || '') !== 見出し[i]) { 足りない = true; break; }
+  }
+  if (!足りない) return;
+  sh.getRange(1, 1, 1, 見出し.length).setValues([見出し]).setFontWeight('bold');
+  sh.setFrozenRows(1);
 }
 
 /** 日付セルが Date で返ってくることがあるので、文字列に揃える。 */
