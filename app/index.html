@@ -28,6 +28,12 @@
   <button type="button" id="btn-search-close" class="icon" aria-label="検索を閉じる">×</button>
 </div>
 
+<!-- 気づかないと困ることだけを、1本だけ出す（同期・書き出し） -->
+<div id="notice" hidden>
+  <button type="button" id="notice-act"><span id="notice-msg"></span></button>
+  <button type="button" id="notice-x" aria-label="閉じる">×</button>
+</div>
+
 <main id="main">
   <section id="view-folders" class="view"></section>
   <section id="view-grid" class="view" hidden></section>
@@ -120,13 +126,14 @@
     <button type="button" data-act="syncnow">今すぐ同期<small id="sync-line"></small></button>
     <button type="button" data-act="syncset">同期の設定</button>
     <hr>
-    <button type="button" data-act="export">書き出す（zip）</button>
+    <button type="button" data-act="export">書き出す（zip）<small id="export-line"></small></button>
     <button type="button" data-act="import">読み込む（zip）</button>
     <hr>
     <button type="button" data-act="dummy">ダミー画像を5枚入れる</button>
     <button type="button" data-act="wipe" class="danger">全部消す</button>
     <hr>
     <button type="button" data-act="close" class="plain">閉じる</button>
+    <small id="store-line" class="hint" style="text-align:center;padding:2px 0 4px"></small>
   </div>
 </dialog>
 <input type="file" id="file-zip" accept=".zip,application/zip" hidden>

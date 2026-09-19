@@ -67,6 +67,7 @@
   /* ================= 起動 ================= */
   function boot() {
     if (!sessionStorage.getItem('warn-dismissed')) $('#sandbox-warn').hidden = false;
+    領域を確保する();
 
     DB.open()
       .then(seedFolders)
@@ -126,6 +127,7 @@
     $('#view-grid').hidden = (S.view === 'folders');
     if (S.view === 'folders') renderFolders(); else renderGrid();
     renderPending();
+    知らせを書く();
   }
 
   function renderPending() {
@@ -838,6 +840,8 @@
       a.href = URL.createObjectURL(blob);
       a.download = 'photomemo_' + today() + '.zip';
       a.click();
+      DB.setMeta('lastExport', new Date().toISOString())
+        .then(function () { 知らせを書く(); }).catch(function () {});
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
       toast(entries.length - 1 + ' 枚 書き出し', null);
     }).catch(function (e) { toast('書き出せませんでした: ' + (e && e.message), null); });
@@ -936,6 +940,91 @@
       });
     });
     Promise.all(jobs).then(intake);
+  }
+
+  /* ================= 保管と、気づかせ方 =================
+     どちらも保存の道筋には割り込まない。出るのは画面の上に1本だけ。 */
+
+  /** ブラウザに「この端末のデータを勝手に捨てないでほしい」と頼む。
+      断られても動きは変わらない（iOS は無視することがある）。 */
+  function 領域を確保する() {
+    try {
+      if (!navigator.storage || !navigator.storage.persist) return;
+      navigator.storage.persisted().then(function (ok) {
+        if (!ok) navigator.storage.persist().catch(function () {});
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function 日数(iso) {
+    if (!iso) return null;
+    var d = (Date.now() - new Date(iso).getTime()) / 86400000;
+    return d < 0 ? 0 : Math.floor(d);
+  }
+
+  function 書き出しの状態() {
+    return DB.getMeta('lastExport').then(function (at) {
+      var n = 日数(at);
+      return { at: at, 日: n,
+               文: at ? (n === 0 ? '今日' : n + '日前') : 'まだ' };
+    }).catch(function () { return { at: null, 日: null, 文: 'まだ' }; });
+  }
+
+  /** 気づかないと困ることだけを1本出す。優先順は 同期 → 書き出し。 */
+  function 知らせを書く() {
+    var el = $('#notice');
+    if (!el) return;
+    if (sessionStorage.getItem('notice-dismissed')) { el.hidden = true; return; }
+
+    var 直近 = SYNC.直近();
+    var 出す = null;
+    if (!SYNC.使える()) {
+      出す = { 文: '同期が未設定です。この端末のメモは外に残りません', 行: '設定' };
+    } else if (直近.error) {
+      出す = { 文: '同期できていません: ' + 直近.error, 行: '設定' };
+    }
+
+    if (出す) return 帯を出す(出す);
+
+    書き出しの状態().then(function (e) {
+      if (!S.items.length) return 帯を出す(null);
+      if (e.日 === null) 帯を出す({ 文: 'まだ zip に書き出していません。写真はこの端末の中だけです', 行: '書き出す' });
+      else if (e.日 >= 14) 帯を出す({ 文: e.日 + '日 書き出していません', 行: '書き出す' });
+      else 帯を出す(null);
+    });
+  }
+
+  function 帯を出す(出す) {
+    var el = $('#notice');
+    el.hidden = !出す;
+    if (!出す) return;
+    $('#notice-msg').textContent = 出す.文;
+    $('#notice-act').onclick = function () {
+      if (出す.行 === '設定') 同期設定を開く(); else exportZip();
+    };
+  }
+
+  /** メニューに、この端末がどれだけ抱えているかを出す。 */
+  function 保管の状態を書く() {
+    var el = $('#store-line');
+    if (!el) return;
+    el.textContent = '';
+    var 出 = [];
+    書き出しの状態().then(function (e) {
+      var x = $('#export-line');
+      if (x) x.textContent = '最後: ' + e.文;
+      if (!navigator.storage || !navigator.storage.estimate) return null;
+      return navigator.storage.estimate();
+    }).then(function (est) {
+      if (est && est.usage) 出.push('この端末に ' + (est.usage / 1048576).toFixed(1) + ' MB');
+      if (navigator.storage && navigator.storage.persisted) {
+        return navigator.storage.persisted().then(function (ok) {
+          出.push(ok ? '保護あり' : '保護なし');
+        }).catch(function () {});
+      }
+    }).then(function () {
+      el.textContent = 出.join(' ／ ');
+    }).catch(function () {});
   }
 
   /* ================= 同期 ================= */
@@ -1059,7 +1148,9 @@
     $('#modal').addEventListener('cancel', function () { /* 既定の挙動のまま */ });
 
     // --- メニュー ---
-    $('#btn-menu').onclick = function () { 同期の状態を書く(); $('#sheet').showModal(); };
+    $('#btn-menu').onclick = function () {
+      同期の状態を書く(); 保管の状態を書く(); $('#sheet').showModal();
+    };
     $('#sheet').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-act]');
       if (!b) return;
@@ -1117,6 +1208,11 @@
         SYNC.設定を保存(元.url, 元.token);
         $('#sync-status').textContent = '繋がりません: ' + ((e && e.message) || e);
       });
+    };
+
+    $('#notice-x').onclick = function () {
+      sessionStorage.setItem('notice-dismissed', '1');
+      $('#notice').hidden = true;
     };
 
     $('#toast-undo').onclick = function () {

@@ -71,6 +71,15 @@ code { font-size: .82em; word-break: break-all; }
 }
 #searchbar input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 
+/* お知らせの帯。出るのは「同期が止まっている」「長く書き出していない」ときだけ */
+#notice { display: flex; align-items: stretch; background: var(--warn-bg); color: var(--warn);
+  border-bottom: 1px solid var(--line); }
+#notice #notice-act {
+  flex: 1; min-height: 40px; text-align: left; padding: 0 12px;
+  border: 0; background: none; color: inherit; font-size: .8rem; font-weight: 600;
+}
+#notice #notice-x { min-width: 40px; border: 0; background: none; color: inherit; font-size: 1.1rem; }
+
 #pending {
   display: flex; gap: 8px; align-items: flex-start;
   margin: 8px; padding: 10px 12px; border-radius: var(--r);

@@ -87,6 +87,18 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.click('#warn-close'); await page.waitForTimeout(200);
     check('注意帯を閉じられる', !(await page.locator('#sandbox-warn').isVisible()));
 
+    /* --- 知らせの帯（同期・書き出し） --- */
+    check('未設定なら同期の帯が出る', await page.locator('#notice').isVisible());
+    check('帯に理由が書いてある',
+      (await page.locator('#notice-msg').textContent()).includes('同期が未設定'),
+      await page.locator('#notice-msg').textContent());
+    await page.click('#notice-act'); await page.waitForTimeout(500);
+    check('帯から同期の設定が開く', await page.locator('#syncset').isVisible());
+    await page.locator('#syncset .close').click(); await page.waitForTimeout(300);
+    await page.click('#notice-x'); await page.waitForTimeout(300);
+    check('帯を閉じられる', !(await page.locator('#notice').isVisible()));
+    await page.evaluate(() => sessionStorage.removeItem('notice-dismissed'));
+
     /* --- 1回目の取り込み --- */
     await dummy();
     check('5枚ぶんの帯が出る', await N(page,'.sth') === 5);
@@ -288,6 +300,15 @@ const N = async (p, sel) => await p.locator(sel).count();
     });
     await page.waitForTimeout(300);
 
+    await page.click('#btn-menu'); await page.waitForTimeout(600);
+    check('メニューに最後の書き出しが出る',
+      (await page.locator('#export-line').textContent()).includes('まだ'),
+      await page.locator('#export-line').textContent());
+    check('メニューに使用量が出る',
+      /MB/.test(await page.locator('#store-line').textContent()),
+      await page.locator('#store-line').textContent());
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+
     /* --- 書き出し --- */
     const dl = page.waitForEvent('download', { timeout: 20000 });
     await page.click('#btn-menu');
@@ -308,6 +329,12 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('zip のメタにシートが入る',
       (metaTxt.stdout||'').includes('"tasting"') && (metaTxt.stdout||'').includes('洋梨'),
       (metaTxt.stdout||'').includes('"tasting"') ? 'あり' : 'なし');
+
+    await page.click('#btn-menu'); await page.waitForTimeout(600);
+    check('書き出すと「今日」に変わる',
+      (await page.locator('#export-line').textContent()).includes('今日'),
+      await page.locator('#export-line').textContent());
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 
     /* --- 全消し → 読み込み（持ち出せることの確認） --- */
     await page.click('#btn-menu');
@@ -419,6 +446,10 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.click('#sync-save'); await page.waitForTimeout(2500);
 
     const 送られた = [...gasRows.values()];
+    // 全消しでメタも消えるので、帯は「書き出していません」に替わる。同期の知らせは消える
+    const 帯 = (await page.locator('#notice').isVisible())
+      ? await page.locator('#notice-msg').textContent() : '';
+    check('同期を設定すると同期の知らせが消える', !帯.includes('同期'), 帯 || '（帯なし）');
     check('既存の全件が送られる', 送られた.length === 5, 'rows=' + 送られた.length);
     check('メモが行に載る', 送られた.some(r => r.memo === 'あとから書き足した'),
           JSON.stringify(送られた.map(r => r.memo)));
