@@ -201,6 +201,7 @@
           (SYNC.未送信(it) ? '<span class="b b-sync" title="未同期">•</span>' : '') +
           (it.memo ? '<span class="b b-memo" title="メモあり">✎</span>' : '') +
           (it.url ? '<span class="b b-url" title="URLあり">🔗</span>' : '') +
+          (中身あり(it.tasting) ? '<span class="b b-wine" title="シートあり">🍷</span>' : '') +
           (it.tags && it.tags.length ? '<span class="b">' + it.tags.length + '</span>' : '') +
         '</span>' +
         '<span class="tdate">' + esc(it.date || '') + '</span>';
@@ -287,7 +288,7 @@
 
     DB.getMeta('lastFolder').then(pick).then(function () {
       paintModal();
-      $('#modal').showModal();
+      モーダルを開く();
     });
   }
 
@@ -304,12 +305,13 @@
         dup: false, createdAt: item.createdAt
       }];
       paintModal();
-      $('#modal').showModal();
+      モーダルを開く();
     });
   }
 
   function paintModal() {
     var d = M.drafts[M.idx], multi = M.drafts.length > 1;
+    paintTasting();
 
     $('#m-count').textContent = M.mode === 'edit' ? '' :
       (multi ? (M.idx + 1) + ' / ' + M.drafts.length + ' 枚目' : '1 枚');
@@ -439,6 +441,172 @@
     i.value = '';
     M.tagsOpen = true;
     paintTags();
+  }
+
+  /* ================= テイスティングシート =================
+     面は横スクロールで並べているだけ。書いた内容はその場で下書きへ入れる。
+     「保存」は共通の足元にあるので、どちらの面からでも1タップで終わる。 */
+  var 詳しく開く = false;
+  try { 詳しく開く = localStorage.getItem('photomemo.tasting.more') === '1'; } catch (e) {}
+
+  function 今のシート() {
+    var d = M.drafts[M.idx];
+    if (!d) return {};
+    if (!d.tasting) d.tasting = {};
+    return d.tasting;
+  }
+
+  function シートに書く(鍵, 値) {
+    var t = 今のシート();
+    if (値 === null || 値 === undefined || 値 === '' || (Array.isArray(値) && !値.length)) delete t[鍵];
+    else t[鍵] = 値;
+  }
+
+  function 項目を作る(項) {
+    var wrap = document.createElement('div');
+    wrap.className = 't-row';
+    wrap.dataset.key = 項.鍵;
+
+    var lab = document.createElement('label');
+    lab.className = 'lab';
+    lab.textContent = 項.鍵;
+    var one = document.createElement('small');
+    one.className = 'one'; one.textContent = 'この1枚に';
+    lab.appendChild(one);
+    wrap.appendChild(lab);
+
+    if (項.型 === '選択' || 項.型 === '複数') {
+      var chips = document.createElement('div');
+      chips.className = 'chips';
+      項.候補.forEach(function (n) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'chip'; b.textContent = n; b.dataset.val = n;
+        b.onclick = function () {
+          var t = 今のシート(), cur = t[項.鍵];
+          if (項.型 === '選択') {
+            シートに書く(項.鍵, cur === n ? null : n);
+          } else {
+            var arr = Array.isArray(cur) ? cur.slice() : [];
+            var i = arr.indexOf(n);
+            if (i >= 0) arr.splice(i, 1); else arr.push(n);
+            シートに書く(項.鍵, arr);
+          }
+          paintTasting();
+        };
+        chips.appendChild(b);
+      });
+      if (項.候補.length > 14) {
+        wrap.dataset.limit = '12';
+        var more = document.createElement('button');
+        more.type = 'button'; more.className = 'chip more t-more';
+        more.textContent = 'すべて';
+        more.onclick = function () {
+          wrap.dataset.open = wrap.dataset.open === '1' ? '' : '1';
+          paintTasting();
+        };
+        chips.appendChild(more);
+      }
+      wrap.appendChild(chips);
+
+    } else if (項.型 === '星') {
+      var box = document.createElement('div');
+      box.className = 't-stars';
+      for (var i = 1; i <= 5; i++) (function (n) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 't-star'; b.textContent = '★';
+        b.dataset.val = String(n);
+        b.setAttribute('aria-label', n + ' / 5');
+        b.onclick = function () {
+          シートに書く(項.鍵, 今のシート()[項.鍵] === n ? null : n);
+          paintTasting();
+        };
+        box.appendChild(b);
+      })(i);
+      wrap.appendChild(box);
+
+    } else {
+      var el = document.createElement(項.型 === '長文' ? 'textarea' : 'input');
+      if (項.型 === '長文') el.rows = 2;
+      else { el.type = 'text'; if (項.数字) el.inputMode = 'numeric'; }
+      el.placeholder = 項.例 || '';
+      el.autocomplete = 'off';
+      el.oninput = function () { シートに書く(項.鍵, el.value.trim()); };
+      wrap.appendChild(el);
+    }
+    return wrap;
+  }
+
+  function 面を組む(箱, 並び) {
+    箱.innerHTML = '';
+    var 組 = null, 入れ物 = null;
+    並び.forEach(function (項) {
+      if (項.組 !== 組) {
+        組 = 項.組;
+        入れ物 = document.createElement('section');
+        入れ物.className = 't-group';
+        var h = document.createElement('h3');
+        h.textContent = 組;
+        入れ物.appendChild(h);
+        箱.appendChild(入れ物);
+      }
+      入れ物.appendChild(項目を作る(項));
+    });
+  }
+
+  function buildTasting() {
+    面を組む($('#m-tasting'), TASTING.簡易);
+    面を組む($('#m-tasting-more-box'), TASTING.詳しく);
+    $('#m-tasting-more-box').hidden = !詳しく開く;
+    $('#m-tasting-more').classList.toggle('on', 詳しく開く);
+    $('#m-tasting-more').setAttribute('aria-expanded', String(詳しく開く));
+  }
+
+  /** 下書きの中身を画面へ映す。押すたびにここを通るので、状態は1か所に集まる。 */
+  function paintTasting() {
+    var t = 今のシート(), multi = M.drafts.length > 1;
+    Array.prototype.forEach.call(document.querySelectorAll('#m-pane-1 .t-row'), function (row) {
+      var 鍵 = row.dataset.key, v = t[鍵];
+      var 上限 = Number(row.dataset.limit || 0), 開く = row.dataset.open === '1', 出した = 0;
+      Array.prototype.forEach.call(row.querySelectorAll('.chip'), function (b) {
+        if (b.classList.contains('t-more')) {
+          b.textContent = 開く ? '閉じる' : 'すべて';
+          return;
+        }
+        var on = Array.isArray(v) ? v.indexOf(b.dataset.val) >= 0 : v === b.dataset.val;
+        b.classList.toggle('on', on);
+        if (上限) { b.hidden = !(開く || on || 出した < 上限); if (!b.hidden) 出した++; }
+      });
+      Array.prototype.forEach.call(row.querySelectorAll('.t-star'), function (b) {
+        b.classList.toggle('on', Number(v || 0) >= Number(b.dataset.val));
+      });
+      var el = row.querySelector('input, textarea');
+      if (el && el.value !== (v || '')) el.value = v || '';
+      var one = row.querySelector('.lab .one');
+      if (one) one.hidden = !multi;
+    });
+  }
+
+  /** 開くときは必ずメモの面から。前に見ていた面を引きずらない。 */
+  function モーダルを開く() {
+    var tr = $('#m-track');
+    tr.scrollLeft = 0;
+    面の印(0);
+    $('#modal').showModal();
+    tr.scrollLeft = 0;
+  }
+
+  /** 面の移動。タブでもスワイプでも、行き先は同じ。 */
+  function 面へ(n) {
+    var tr = $('#m-track');
+    tr.scrollTo({ left: tr.clientWidth * n, behavior: 'smooth' });
+    面の印(n);
+  }
+
+  function 面の印(n) {
+    Array.prototype.forEach.call(document.querySelectorAll('.m-tab'), function (b, i) {
+      b.classList.toggle('on', i === n);
+      b.setAttribute('aria-pressed', String(i === n));
+    });
   }
 
   /* シートに書いた言葉を平らにする。項目が増えても手を入れなくて済むよう、
@@ -830,6 +998,25 @@
     // 既定は小さく出す（日付・URL まで一目に入れる）。読みたいときだけ押して伸ばす。
     $('#m-preview').onclick = function () { this.classList.toggle('big'); };
     $('#m-save').onclick = save;
+
+    // --- シートの面 ---
+    buildTasting();
+    Array.prototype.forEach.call(document.querySelectorAll('.m-tab'), function (b) {
+      b.onclick = function () { 面へ(Number(b.dataset.pane)); };
+    });
+    $('#m-track').addEventListener('scroll', function () {
+      var tr = $('#m-track');
+      if (!tr.clientWidth) return;
+      面の印(Math.round(tr.scrollLeft / tr.clientWidth));
+    }, { passive: true });
+    $('#m-tasting-more').onclick = function () {
+      詳しく開く = !詳しく開く;
+      try { localStorage.setItem('photomemo.tasting.more', 詳しく開く ? '1' : '0'); } catch (e) {}
+      $('#m-tasting-more-box').hidden = !詳しく開く;
+      this.classList.toggle('on', 詳しく開く);
+      this.setAttribute('aria-expanded', String(詳しく開く));
+      paintTasting();
+    };
     $('#m-del').onclick = removeCurrent;
     $('#m-newtag-add').onclick = addNewTag;
     $('#m-newtag').onkeydown = function (e) {

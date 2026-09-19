@@ -173,6 +173,80 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.click('#btn-search-close'); await page.waitForTimeout(400);
     check('検索バーを閉じられる', !(await page.locator('#searchbar').isVisible()));
 
+    /* --- テイスティングシートの面（スワイプ/タブ） --- */
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(500);
+    check('開くとメモの面から始まる',
+      (await page.evaluate(() => document.querySelector('#m-track').scrollLeft)) === 0);
+    check('ワインのタブが出ている', await page.locator('.m-tab').nth(1).isVisible());
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(700);
+    const 面 = await page.evaluate(() => {
+      const t = document.querySelector('#m-track');
+      return { 位置: Math.round(t.scrollLeft / t.clientWidth), 印: document.querySelectorAll('.m-tab.on')[0].textContent };
+    });
+    check('タブでワインの面へ移る', 面.位置 === 1 && 面.印 === 'ワイン', JSON.stringify(面));
+    check('シート側でも保存ボタンが見えている', await page.locator('#m-save').isVisible());
+
+    // 何も書かずに保存できる（必須項目を作らない）
+    dialogFired = false;
+    await page.click('#m-save'); await page.waitForTimeout(800);
+    check('シートに何も書かずに保存できる', !dialogFired && await N(page,'#modal[open]') === 0);
+    check('何も書かなければシートは付かない',
+      await page.evaluate(() => APP.S.items.every(i => !i.tasting)));
+
+    // 書いて保存 → 開き直すと残っている
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(500);
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(600);
+    await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
+    await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip', { hasText: 'いちご' }).click();
+    await page.waitForTimeout(200);
+    const 香り数 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
+    check('香りは既定で絞って出る（12個＋すべて＋選んだ分）', 香り数 <= 14, String(香り数));
+    // 枠の外にある語は「すべて」を開かないと選べない
+    await page.locator('#m-pane-1 .t-row[data-key="香り"] .t-more').click();
+    await page.waitForTimeout(200);
+    const 香り全 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
+    check('「すべて」で全部出る', 香り全 > 30, String(香り全));
+    await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip', { hasText: '樽' }).click();
+    await page.locator('#m-pane-1 .t-row[data-key="香り"] .t-more').click();
+    await page.waitForTimeout(200);
+    const 香り後 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
+    check('閉じても選んだ語は残って見える', 香り後 <= 15 &&
+      await N(page,'#m-pane-1 .t-row[data-key="香り"] .chip.on:visible') === 2, String(香り後));
+    await page.locator('#m-pane-1 .t-row[data-key="評価"] .t-star').nth(3).click();
+    await page.fill('#m-pane-1 .t-row[data-key="ワイン名"] input', 'ためしの一本');
+    await page.waitForTimeout(200);
+
+    check('詳しくは畳まれている', !(await page.locator('#m-tasting-more-box').isVisible()));
+    await page.click('#m-tasting-more'); await page.waitForTimeout(300);
+    check('「詳しく」で追加項目が開く', await page.locator('#m-tasting-more-box').isVisible());
+    await page.click('#m-save'); await page.waitForTimeout(900);
+
+    const 書けた = await page.evaluate(() =>
+      (APP.S.items.find(i => i.tasting && i.tasting.ワイン名) || {}).tasting || null);
+    check('シートが1枚に付く',
+      !!書けた && 書けた.色 === 'ガーネット' && 書けた.評価 === 4 && 書けた.ワイン名 === 'ためしの一本',
+      JSON.stringify(書けた));
+    check('複数選べる香りが配列で入る',
+      !!書けた && Array.isArray(書けた.香り) && 書けた.香り.length === 2, JSON.stringify(書けた && 書けた.香り));
+    check('タイルに 🍷 が出る', await N(page,'.b-wine') === 1, String(await N(page,'.b-wine')));
+
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(500);
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(600);
+    check('開き直すと選んだものが残っている',
+      await N(page,'#m-pane-1 .t-row[data-key="色"] .chip.on') === 1 &&
+      await N(page,'#m-pane-1 .t-row[data-key="香り"] .chip.on') === 2 &&
+      await N(page,'#m-pane-1 .t-row[data-key="評価"] .t-star.on') === 4);
+    check('「詳しく」の開閉を覚えている', await page.locator('#m-tasting-more-box').isVisible());
+    // もう一度押すと外れる（任意のままにできる）
+    await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
+    await page.waitForTimeout(200);
+    check('もう一度押すと外れる', await N(page,'#m-pane-1 .t-row[data-key="色"] .chip.on') === 0);
+    await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
+    await page.click('#m-save'); await page.waitForTimeout(800);
+
     /* --- テイスティングシート（器だけ。画面はまだ無いので直接書く） --- */
     await page.evaluate(async () => {
       // 1枚目は後で削除の検査に使われるので、最後まで残る「さんまいめ」に書く
@@ -185,7 +259,7 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.waitForTimeout(400);
     await page.click('#btn-search');
     await page.fill('#q', '洋梨'); await page.waitForTimeout(400);
-    check('シートの言葉で検索できる', await N(page,'.tile') === 1, String(await N(page,'.tile')));
+    check('シートの言葉で検索できる', await N(page,'.tile') === 1, String(await N(page,'.tile')));  // 洋梨は1枚だけ
     await page.click('#btn-search-close'); await page.waitForTimeout(300);
 
     /* --- 書き出し --- */
@@ -233,7 +307,8 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('読み込みでメモが戻る', r.memo === 2, 'memo=' + r.memo);
     check('読み込みでURLが戻る', r.url === 1, 'url=' + r.url);
     check('読み込みでサムネが作り直される', r.thumb === r.n, 'thumb=' + r.thumb);
-    const t1 = await page.evaluate(() => (APP.S.items.find(i => i.tasting) || {}).tasting || null);
+    const t1 = await page.evaluate(() =>
+      (APP.S.items.find(i => i.tasting && (i.tasting.香り || []).includes('洋梨')) || {}).tasting || null);
     check('読み込みでシートが戻る',
       !!t1 && t1.色 === 'ルビー' && (t1.香り || []).includes('洋梨') && t1.評価 === 4,
       JSON.stringify(t1));
@@ -316,11 +391,12 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('フォルダ名が行に載る', 送られた.every(r => r.folder === '資料'),
           JSON.stringify([...new Set(送られた.map(r => r.folder))]));
     const 味行 = 送られた.filter(r => r.tasting);
-    check('シートが行に載る（JSON 1列）', 味行.length === 1, '行=' + 味行.length);
+    check('シートが行に載る（JSON 1列）', 味行.length === 2, '行=' + 味行.length);
+    const 洋梨行 = 味行.filter(r => r.tasting.indexOf('洋梨') >= 0);
     check('行のシートが読み戻せる', (() => {
-      try { const o = JSON.parse(味行[0].tasting); return o.色 === 'ルビー' && o.香り[0] === '洋梨'; }
+      try { const o = JSON.parse(洋梨行[0].tasting); return o.色 === 'ルビー' && o.香り[0] === '洋梨'; }
       catch (e) { return false; }
-    })(), (味行[0] || {}).tasting);
+    })(), (洋梨行[0] || {}).tasting);
     check('ハッシュが行に載る', 送られた.every(r => r.hash && r.hash.length > 8));
     check('画像は送っていない',
       送られた.every(r => !('blob' in r) && !('thumb' in r) && JSON.stringify(r).length < 2000));
@@ -375,7 +451,8 @@ const N = async (p, sel) => await p.locator(sel).count();
     }));
     check('消しても メモが引き直せる', 戻り.n === 4, 'items=' + 戻り.n);
     check('引き直した分は画像待ちになる', 戻り.waiting === 戻り.n, 'waiting=' + 戻り.waiting);
-    const t2 = await page.evaluate(() => (APP.S.items.find(i => i.tasting) || {}).tasting || null);
+    const t2 = await page.evaluate(() =>
+      (APP.S.items.find(i => i.tasting && (i.tasting.香り || []).includes('洋梨')) || {}).tasting || null);
     check('消してもシートが引き直せる',
       !!t2 && t2.色 === 'ルビー' && (t2.香り || []).includes('洋梨'), JSON.stringify(t2));
     check('メモの中身がそのまま戻る', 戻り.memos.includes('さんまいめのメモ'),

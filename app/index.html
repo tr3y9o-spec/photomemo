@@ -54,7 +54,13 @@
       <button type="button" id="m-del" class="icon danger" aria-label="削除" hidden>🗑</button>
     </header>
 
-    <div class="m-body">
+    <nav class="m-tabs" id="m-tabs">
+      <button type="button" class="m-tab on" data-pane="0" aria-pressed="true">メモ</button>
+      <button type="button" class="m-tab" data-pane="1" aria-pressed="false">ワイン</button>
+    </nav>
+
+    <div class="m-track" id="m-track">
+    <div class="m-body m-pane" id="m-pane-0">
       <div id="m-preview"></div>
       <div id="m-strip" class="strip" hidden></div>
       <p id="m-dup" class="dup" hidden></p>
@@ -90,6 +96,13 @@
           <button type="button" id="m-paste">貼付</button>
         </div>
       </div>
+    </div>
+
+    <div class="m-body m-pane" id="m-pane-1">
+      <div id="m-tasting"></div>
+      <button type="button" id="m-tasting-more" class="more-btn" aria-expanded="false">詳しく</button>
+      <div id="m-tasting-more-box" hidden></div>
+    </div>
     </div>
 
     <footer class="m-foot">
@@ -165,6 +178,7 @@
 
 <script src="lib.js"></script>
 <script src="db.js"></script>
+<script src="tasting.js"></script>
 <script src="sync.js"></script>
 <script src="app.js"></script>
 </body>

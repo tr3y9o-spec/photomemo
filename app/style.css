@@ -149,6 +149,51 @@ dialog form, .sheet-body { display: flex; flex-direction: column; max-height: 92
 }
 .m-head > span { font-size: .85rem; color: var(--dim); font-weight: 600; }
 .m-body { overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
+
+/* ---------- モーダルの2面（メモ / ワイン） ----------
+   横スクロールに載せているだけで、独自のジェスチャ処理は書いていない。
+   縦に読む動きと取り合いにならないのと、スワイプできない環境でも
+   上のタブで行き来できるのが理由。 */
+.m-tabs { display: flex; gap: 4px; padding: 6px 8px 0; }
+.m-tab {
+  flex: 1; min-height: 40px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--dim); font-size: .9rem; font-weight: 600;
+}
+.m-tab.on { background: var(--bg); color: var(--fg); }
+.m-track {
+  display: flex; flex: 1; min-height: 0;
+  overflow-x: auto; scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.m-track::-webkit-scrollbar { display: none; }
+.m-pane { flex: 0 0 100%; scroll-snap-align: start; }
+
+/* ---------- テイスティングシート ---------- */
+.t-group { margin-top: 14px; }
+.t-group:first-child { margin-top: 2px; }
+.t-group > h3 {
+  margin: 0 0 6px; font-size: .78rem; font-weight: 700; color: var(--dim);
+  letter-spacing: .04em;
+}
+.t-row { margin-top: 8px; }
+.t-row .lab { margin-bottom: 4px; }
+.t-row input, .t-row textarea {
+  width: 100%; min-height: 44px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+}
+.t-row textarea { resize: vertical; }
+.t-stars { display: flex; gap: 4px; }
+.t-star {
+  min-width: 44px; min-height: 44px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--line); font-size: 1.5rem; line-height: 1;
+}
+.t-star.on { color: var(--accent); }
+.more-btn {
+  width: 100%; min-height: 48px; margin-top: 18px;
+  border: 1px dashed var(--line); border-radius: 12px;
+  background: transparent; color: var(--dim); font-weight: 600;
+}
+.more-btn.on { color: var(--fg); }
 .m-foot {
   padding: 10px 12px calc(10px + var(--safe-b));
   border-top: 1px solid var(--line); background: var(--card);
