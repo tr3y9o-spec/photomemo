@@ -66,13 +66,9 @@ const 語 = [
 /* 1回目で的外れだった語を、言い方を変えて引き直すための表。
    候補の番号は 10 番台にして、1回目のものと混ざらないようにする。 */
 const 言い直し = [
-  ['レモン', 'lemon', 'lemons yellow citrus fruit'],
-  ['洋梨', 'pear', 'pears on wooden table'],
-  ['プラム', 'plum', 'ripe plums purple fruit'],
-  ['ミント', 'mint', 'peppermint herb leaves'],
-  ['干し草', 'hay', 'hay field straw dried grass'],
-  ['丁子', 'clove', 'dried cloves spice heap'],
-  ['バター', 'butter', 'butter on dish dairy']
+  ['干し草', 'hay', 'hay bales straw field'],
+  ['丁子', 'clove', 'whole cloves spice'],
+  ['バター', 'butter', 'butter stick block sliced']
 ];
 
 /* 題に入っていたら避ける言葉（病気・虫・死骸などを掴まないように） */
@@ -84,7 +80,7 @@ async function 探す(やり直し) {
   fs.mkdirSync(path.join(OUT, 'cand'), { recursive: true });
   const 元 = path.join(OUT, 'candidates.json');
   const 表 = (やり直し && fs.existsSync(元)) ? JSON.parse(fs.readFileSync(元, 'utf-8')) : {};
-  const ずらし = やり直し ? 10 : 0;
+  const ずらし = やり直し ? Number(process.argv[4] || 10) : 0;
   for (const [jp, slug, q] of (やり直し ? 言い直し : 語)) {
     const u = 'https://api.openverse.org/v1/images/?q=' + encodeURIComponent(q) +
       '&license=cc0,pdm&page_size=12&mature=false';

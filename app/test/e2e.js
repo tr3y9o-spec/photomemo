@@ -213,10 +213,12 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.waitForTimeout(200);
     const 香り全 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
     check('「すべて」で全部出る', 香り全 > 30, String(香り全));
-    check('写真の無い語は文字のまま混ざる', await page.evaluate(() => {
-      const b = [...document.querySelectorAll('#m-pane-1 .t-row[data-key="香り"] .chip')]
-        .find(x => x.dataset.val === '干し草');
-      return !!b && !b.querySelector('img') && b.textContent === '干し草';
+    // 写真のある語だけ絵になる。無い語は文字のタイルで同じ枠に収まる
+    check('写真の有無とタイルの形が一致する', await page.evaluate(() => {
+      const 写 = TASTING.香りの写真 || {};
+      return [...document.querySelectorAll('#m-pane-1 .t-row[data-key="香り"] .chip')]
+        .filter(b => !b.classList.contains('t-more'))
+        .every(b => !!b.querySelector('img') === !!写[b.dataset.val]);
     }));
     await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip', { hasText: '樽' }).click();
     await page.locator('#m-pane-1 .t-row[data-key="香り"] .t-more').click();
