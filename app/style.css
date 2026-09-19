@@ -188,6 +188,19 @@ dialog form, .sheet-body { display: flex; flex-direction: column; max-height: 92
   background: transparent; color: var(--line); font-size: 1.5rem; line-height: 1;
 }
 .t-star.on { color: var(--accent); }
+/* 香りは絵で選ぶ。写真の無い語は文字のタイルのまま同じ枠に収まる */
+.chip.photo {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  width: 78px; min-height: 96px; padding: 5px 2px 6px;
+  border-radius: 12px; font-size: .72rem; line-height: 1.2;
+}
+.chip.photo img {
+  width: 60px; height: 60px; object-fit: cover; border-radius: 9px;
+  background: var(--line); display: block;
+}
+.chip.photo.on { background: var(--accent); color: var(--accent-fg); }
+.chip.photo.on img { outline: 2px solid var(--accent-fg); outline-offset: -2px; }
+
 .more-btn {
   width: 100%; min-height: 48px; margin-top: 18px;
   border: 1px dashed var(--line); border-radius: 12px;

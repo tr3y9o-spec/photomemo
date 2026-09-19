@@ -480,7 +480,19 @@
       chips.className = 'chips';
       項.候補.forEach(function (n) {
         var b = document.createElement('button');
-        b.type = 'button'; b.className = 'chip'; b.textContent = n; b.dataset.val = n;
+        b.type = 'button'; b.className = 'chip'; b.dataset.val = n;
+        var 写 = 項.写真 && TASTING.香りの写真 && TASTING.香りの写真[n];
+        if (写) {
+          // 写真のある語は絵で選ぶ。無い語は文字のまま混ざる（欠けて見えないように）
+          b.className = 'chip photo';
+          var im = document.createElement('img');
+          im.src = 'aroma/' + 写 + '.webp'; im.alt = ''; im.loading = 'lazy'; im.width = 64; im.height = 64;
+          var cap = document.createElement('span');
+          cap.textContent = n;
+          b.appendChild(im); b.appendChild(cap);
+        } else {
+          b.textContent = n;
+        }
         b.onclick = function () {
           var t = 今のシート(), cur = t[項.鍵];
           if (項.型 === '選択') {

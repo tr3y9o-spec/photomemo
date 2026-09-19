@@ -4,7 +4,7 @@ const http = require('http'), fs = require('fs'), path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const SP = process.env.OUT_DIR || fs.mkdtempSync(path.join(require('os').tmpdir(), 'photomemo-'));
 const TYPES = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.webmanifest':'application/manifest+json', '.svg':'image/svg+xml' };
+  '.webmanifest':'application/manifest+json', '.svg':'image/svg+xml', '.webp':'image/webp' };
 
 const server = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);
@@ -201,6 +201,11 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
     await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip', { hasText: 'いちご' }).click();
     await page.waitForTimeout(200);
+    const 絵 = await page.evaluate(() => {
+      const im = [...document.querySelectorAll('#m-pane-1 .t-row[data-key="香り"] .chip:not([hidden]) img')];
+      return { 枚: im.length, 出た: im.filter(i => i.complete && i.naturalWidth > 0).length };
+    });
+    check('香りが写真のタイルで出る', 絵.枚 >= 10 && 絵.出た === 絵.枚, JSON.stringify(絵));
     const 香り数 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
     check('香りは既定で絞って出る（12個＋すべて＋選んだ分）', 香り数 <= 14, String(香り数));
     // 枠の外にある語は「すべて」を開かないと選べない
@@ -208,6 +213,11 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.waitForTimeout(200);
     const 香り全 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
     check('「すべて」で全部出る', 香り全 > 30, String(香り全));
+    check('写真の無い語は文字のまま混ざる', await page.evaluate(() => {
+      const b = [...document.querySelectorAll('#m-pane-1 .t-row[data-key="香り"] .chip')]
+        .find(x => x.dataset.val === '干し草');
+      return !!b && !b.querySelector('img') && b.textContent === '干し草';
+    }));
     await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip', { hasText: '樽' }).click();
     await page.locator('#m-pane-1 .t-row[data-key="香り"] .t-more').click();
     await page.waitForTimeout(200);
