@@ -204,7 +204,7 @@
           (it.memo ? '<span class="b b-memo" title="メモあり">✎</span>' : '') +
           (it.url ? '<span class="b b-url" title="URLあり">🔗</span>' : '') +
           (中身あり(it.tasting) ? '<span class="b b-wine" title="シートあり">🍷</span>' : '') +
-          (it.tags && it.tags.length ? '<span class="b">' + it.tags.length + '</span>' : '') +
+          (手のタグ(it.tags).length ? '<span class="b">' + 手のタグ(it.tags).length + '</span>' : '') +
         '</span>' +
         '<span class="tdate">' + esc(it.date || '') + '</span>';
       b.onclick = function () { openEdit(it); };
@@ -276,7 +276,7 @@
       var 復元 = (drafts.length === 1 && drafts[0].復元) ? drafts[0].復元 : null;
       if (復元) {
         M.folderId = ok(復元.folderId) ? 復元.folderId : (S.folders[0] && S.folders[0].id);
-        M.tags = (復元.tags || []).slice();
+        M.tags = 手のタグ(復元.tags);
       } else {
         M.folderId = ok(S.folderId) ? S.folderId : (ok(last) ? last : (S.folders[0] && S.folders[0].id));
       }
@@ -298,7 +298,7 @@
     DB.getBlob(item.id).then(function (b) {
       M.mode = 'edit'; M.idx = 0; M.tagsOpen = false;
       M.folderId = item.folderId;
-      M.tags = (item.tags || []).slice();
+      M.tags = 手のタグ(item.tags);
       M.drafts = [{
         id: item.id, blob: b, thumb: item.thumb, w: item.w, h: item.h,
         mime: item.mime, name: item.name, hash: item.hash,
@@ -639,6 +639,43 @@
 
   function 中身あり(t) { return !!(t && Object.keys(t).length); }
 
+  /* ---- シートの値をタグへ写す ----
+     形は「鍵:値」（例 酸味:やや高い）。値だけだと、やや高いが酸味か渋みか分からなくなる。
+     これは計算で作るタグなので、手で編むタグ（M.tags）とは分けて扱う。
+     ・タグ欄・タグ整理には出さない（手で直すとシートの値と食い違うため）
+     ・スプレッドシートの tags 列と メタ.json には、そのまま並んで載る */
+  function シートの鍵() {
+    var out = {};
+    [].concat(TASTING.簡易, TASTING.詳しく).forEach(function (項) {
+      if (項.タグ !== false) out[項.鍵] = true;
+    });
+    return out;
+  }
+
+  function シート由来のタグ(t) {
+    if (!中身あり(t)) return [];
+    var 対象 = シートの鍵(), out = [];
+    Object.keys(t).forEach(function (k) {
+      if (!対象[k]) return;
+      var v = t[k];
+      (Array.isArray(v) ? v : [v]).forEach(function (x) {
+        x = String(x == null ? '' : x).trim();
+        if (x) out.push(k + ':' + x);
+      });
+    });
+    return out;
+  }
+
+  /** 計算で作ったタグかどうか。鍵が今の項目にあるものだけをそう見なす。 */
+  function 由来タグか(名) {
+    var i = String(名).indexOf(':');
+    return i > 0 && !!シートの鍵()[名.slice(0, i)];
+  }
+
+  function 手のタグ(list) {
+    return (list || []).filter(function (n) { return !由来タグか(n); });
+  }
+
   /* ---- 保存。ここで聞き返さない。失敗しうる分岐を作らない。 ---- */
   function save() {
     stash();
@@ -647,8 +684,12 @@
     var tags = M.tags.slice();
 
     var writes = M.drafts.map(function (d) {
+      // 手で付けたタグは全部に、シート由来は書いた1枚だけに付く
+      var 全タグ = tags.concat(シート由来のタグ(d.tasting)).filter(function (n, i, a) {
+        return a.indexOf(n) === i;
+      });
       var item = {
-        id: d.id, folderId: fid, tags: tags,
+        id: d.id, folderId: fid, tags: 全タグ,
         memo: d.memo || '', date: d.date || today(), url: d.url || '',
         createdAt: d.createdAt || now, updatedAt: now,
         mime: d.mime, name: d.name, hash: d.hash, w: d.w, h: d.h, thumb: d.thumb
@@ -661,7 +702,7 @@
     var isNew = (M.mode === 'new');
 
     Promise.all(writes)
-      .then(function () { return DB.bumpTags(tags); })
+      .then(function () { return DB.bumpTags(tags); })   // 計算タグは数えない
       .then(function () { return DB.setMeta('lastFolder', fid); })
       .then(reload)
       .then(function () {
@@ -754,8 +795,9 @@
     var w = $('#tagman-list');
     w.innerHTML = '';
     var used = {};
-    S.items.forEach(function (i) { (i.tags || []).forEach(function (t) { used[t] = (used[t] || 0) + 1; }); });
-    var list = tagOrder(false);
+    // 計算で作ったタグは数えない（手で直せるものだけを一覧に出す）
+    S.items.forEach(function (i) { 手のタグ(i.tags).forEach(function (t) { used[t] = (used[t] || 0) + 1; }); });
+    var list = tagOrder(false).filter(function (n) { return !由来タグか(n); });
     Object.keys(used).forEach(function (n) { if (list.indexOf(n) < 0) list.push(n); });
     if (!list.length) w.innerHTML = '<p class="hint">まだタグがありません。</p>';
     list.forEach(function (n) {
@@ -873,7 +915,7 @@
         if (!data) {
           // 画像の無い項目＝「画像待ち」。メモだけが残っている、一番取り返しのつかない記録なので
           // 飛ばさずに戻す。あとで同じ写真を選び直せば、ハッシュ一致で結び付く（§8）
-          (m.tags || []).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
+          手のタグ(m.tags).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
           items.push({
             id: m.id || uid(), folderId: fmap[m.folder] || (S.folders[0] && S.folders[0].id),
             tags: m.tags || [], memo: m.memo || '', date: m.date || today(), url: m.url || '',
@@ -885,7 +927,7 @@
           return Promise.resolve();
         }
         var blob = new Blob([data], { type: m.mime || 'application/octet-stream' });
-        (m.tags || []).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
+        手のタグ(m.tags).forEach(function (t) { tagset[t] = (tagset[t] || 0) + 1; });
         // サムネは zip に入れていないので、ここで作り直す
         return LIB.makeThumb(blob).then(function (t) {
           var id = m.id || uid();

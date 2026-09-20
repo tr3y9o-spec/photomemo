@@ -254,6 +254,12 @@ const N = async (p, sel) => await p.locator(sel).count();
       JSON.stringify(書けた));
     check('複数選べる香りが配列で入る',
       !!書けた && Array.isArray(書けた.香り) && 書けた.香り.length === 2, JSON.stringify(書けた && 書けた.香り));
+    const タ = await page.evaluate(() =>
+      (APP.S.items.find(i => i.tasting && i.tasting.ワイン名) || {}).tags || []);
+    check('シートの値が「鍵:値」のタグになる',
+      タ.includes('色:ガーネット') && タ.includes('香り:いちご') && タ.includes('香り:樽') &&
+      タ.includes('評価:4') && タ.includes('ワイン名:ためしの一本'), JSON.stringify(タ));
+    check('手で付けたタグも残る', タ.includes('海辺') && タ.includes('仕事'), JSON.stringify(タ));
     check('タイルに 🍷 が出る', await N(page,'.b-wine') === 1, String(await N(page,'.b-wine')));
 
     await page.locator('.tile').first().click();
@@ -263,6 +269,10 @@ const N = async (p, sel) => await p.locator(sel).count();
       await N(page,'#m-pane-1 .t-row[data-key="色"] .chip.on') === 1 &&
       await N(page,'#m-pane-1 .t-row[data-key="香り"] .chip.on') === 2 &&
       await N(page,'#m-pane-1 .t-row[data-key="評価"] .t-star.on') === 4);
+    check('計算で作ったタグはタグ欄に出ない',
+      await N(page, '#m-tags .chip') > 0 &&
+      await page.evaluate(() => [...document.querySelectorAll('#m-tags .chip')]
+        .every(b => b.textContent.indexOf(':') < 0)));
     check('「詳しく」の開閉を覚えている', await page.locator('#m-tasting-more-box').isVisible());
     // もう一度押すと外れる（任意のままにできる）
     await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
@@ -349,7 +359,7 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.waitForTimeout(3000);
     const r = await page.evaluate(() => ({
       n: APP.S.items.length,
-      tags: APP.S.items[0].tags,
+      tags: (APP.S.items[0].tags || []).filter(t => t.indexOf(':') < 0),
       memo: APP.S.items.map(i => i.memo).filter(Boolean).length,
       thumb: APP.S.items.filter(i => i.thumb).length,
       url: APP.S.items.filter(i => i.url).length,
@@ -392,6 +402,8 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.click('#btn-menu');
     await page.click('button[data-act="tags"]');
     await page.waitForSelector('#tagman[open]');
+    check('計算で作ったタグはタグ整理に出ない', await page.evaluate(() =>
+      [...document.querySelectorAll('#tagman-list input')].every(i => i.value.indexOf(':') < 0)));
     const before = await N(page,'#tagman-list .mrow');
     // 回数も時刻も同じタグは名前順で並ぶ。名前順はブラウザの言語で変わる
     // （ja では 海辺→仕事、en では 仕事→海辺）ので、残る名前は決め打ちしない
@@ -401,7 +413,8 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.waitForTimeout(1200);
     const after = await N(page,'#tagman-list .mrow');
     check('同名にすると統合される', after === before - 1, before + ' -> ' + after);
-    const merged = await page.evaluate(() => APP.S.items[0].tags);
+    const merged = await page.evaluate(() =>
+      (APP.S.items[0].tags || []).filter(t => t.indexOf(':') < 0));
     check('統合後もタグが1つ残る', merged.length === 1, JSON.stringify(merged));
     await page.locator('#tagman .close').click(); await page.waitForTimeout(300);
 
@@ -453,8 +466,12 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('既存の全件が送られる', 送られた.length === 5, 'rows=' + 送られた.length);
     check('メモが行に載る', 送られた.some(r => r.memo === 'あとから書き足した'),
           JSON.stringify(送られた.map(r => r.memo)));
-    check('タグが行に載る', 送られた.every(r => r.tags === keep),
-          JSON.stringify(送られた.map(r => r.tags)));
+    check('タグが行に載る',
+      送られた.every(r => (r.tags || '').split(',').filter(t => t.indexOf(':') < 0).join(',') === keep),
+      JSON.stringify(送られた.map(r => r.tags)));
+    check('シート由来のタグも行に載る',
+      送られた.some(r => (r.tags || '').includes('色:ガーネット')),
+      JSON.stringify(送られた.map(r => r.tags).filter(Boolean)));
     check('フォルダ名が行に載る', 送られた.every(r => r.folder === '資料'),
           JSON.stringify([...new Set(送られた.map(r => r.folder))]));
     const 味行 = 送られた.filter(r => r.tasting);
