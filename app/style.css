@@ -191,6 +191,20 @@ dialog form, .sheet-body { display: flex; flex-direction: column; max-height: 92
   border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
 }
 .t-row textarea { resize: vertical; }
+/* 何回ぶんでも積める。回の切り替えはここ */
+.times { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; }
+.times .chip { min-height: 38px; font-size: .8rem; }
+.times .when { flex-basis: 100%; color: var(--dim); font-size: .75rem; }
+.times .rm { color: var(--danger); border-style: dashed; }
+
+/* 強弱の目盛り。7つを1行に収める。押すのは短い語、記録は元の言葉 */
+.chips.scale { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.chips.scale .chip {
+  min-height: 44px; padding: 0; border-radius: 10px;
+  font-size: .72rem; line-height: 1.15; white-space: nowrap;
+}
+.lab .now { font-weight: 400; color: var(--dim); }
+
 .t-stars { display: flex; gap: 4px; }
 .t-star {
   min-width: 44px; min-height: 44px; border: 0; border-radius: 10px;

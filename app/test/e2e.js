@@ -238,6 +238,19 @@ const N = async (p, sel) => await p.locator(sel).count();
     const 香り後 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
     check('閉じても選んだ語は残って見える', 香り後 <= 15 &&
       await N(page,'#m-pane-1 .t-row[data-key="香り"] .chip.on:visible') === 2, String(香り後));
+    // 目盛りは7つが1行。押すのは短い語で、記録は元の言葉
+    await page.locator('#m-pane-1 .t-row[data-key="酸味"] .chip[data-val="やや高い"]').click();
+    await page.waitForTimeout(200);
+    const 目盛り = await page.evaluate(() => {
+      const row = document.querySelector('#m-pane-1 .t-row[data-key="酸味"]');
+      const cs = [...row.querySelectorAll('.chip')];
+      const 上 = new Set(cs.map(c => Math.round(c.getBoundingClientRect().top)));
+      return { 数: cs.length, 行数: 上.size, 押した語: cs.find(c => c.classList.contains('on')).textContent,
+               ラベル: row.querySelector('.lab .now').textContent };
+    });
+    check('7段が1行に収まる', 目盛り.数 === 7 && 目盛り.行数 === 1, JSON.stringify(目盛り));
+    check('押すのは短い語、出るのは元の言葉',
+      目盛り.押した語 === 'やや高' && 目盛り.ラベル === 'やや高い', JSON.stringify(目盛り));
     await page.locator('#m-pane-1 .t-row[data-key="評価"] .t-star').nth(3).click();
     await page.fill('#m-pane-1 .t-row[data-key="ワイン名"] input', 'ためしの一本');
     await page.waitForTimeout(200);
@@ -247,15 +260,19 @@ const N = async (p, sel) => await p.locator(sel).count();
     check('「詳しく」で追加項目が開く', await page.locator('#m-tasting-more-box').isVisible());
     await page.click('#m-save'); await page.waitForTimeout(900);
 
-    const 書けた = await page.evaluate(() =>
-      (APP.S.items.find(i => i.tasting && i.tasting.ワイン名) || {}).tasting || null);
+    const 束 = await page.evaluate(() =>
+      (APP.S.items.find(i => Array.isArray(i.tasting) && i.tasting.some(r => r.ワイン名)) || {}).tasting || null);
+    check('1回ぶんの記録として積まれる', Array.isArray(束) && 束.length === 1, JSON.stringify(束));
+    check('回に記録した時刻が入る', !!(束 && 束[0].記録日時), (束 && 束[0].記録日時) || 'なし');
+    const 書けた = 束 ? 束[0] : null;
     check('シートが1枚に付く',
       !!書けた && 書けた.色 === 'ガーネット' && 書けた.評価 === 4 && 書けた.ワイン名 === 'ためしの一本',
       JSON.stringify(書けた));
     check('複数選べる香りが配列で入る',
       !!書けた && Array.isArray(書けた.香り) && 書けた.香り.length === 2, JSON.stringify(書けた && 書けた.香り));
     const タ = await page.evaluate(() =>
-      (APP.S.items.find(i => i.tasting && i.tasting.ワイン名) || {}).tags || []);
+      (APP.S.items.find(i => Array.isArray(i.tasting) && i.tasting.some(r => r.ワイン名)) || {}).tags || []);
+    check('目盛りも元の言葉でタグになる', タ.includes('酸味:やや高い'), JSON.stringify(タ));
     check('シートの値が「鍵:値」のタグになる',
       タ.includes('色:ガーネット') && タ.includes('香り:いちご') && タ.includes('香り:樽') &&
       タ.includes('評価:4') && タ.includes('ワイン名:ためしの一本'), JSON.stringify(タ));
@@ -274,6 +291,56 @@ const N = async (p, sel) => await p.locator(sel).count();
       await page.evaluate(() => [...document.querySelectorAll('#m-tags .chip')]
         .every(b => b.textContent.indexOf(':') < 0)));
     check('「詳しく」の開閉を覚えている', await page.locator('#m-tasting-more-box').isVisible());
+    /* --- 同じ写真に2回目を積む --- */
+    check('回の帯に1回目が出ている',
+      (await page.locator('#m-times .chip').first().textContent()) === '1回目');
+    await page.locator('#m-times .chip', { hasText: 'もう一度' }).click();
+    await page.waitForTimeout(400);
+    check('2回目が増える', await N(page, '#m-times .chip[data-val], #m-times .chip') >= 2,
+      String(await N(page, '#m-times .chip')));
+    check('2回目は何も選ばれていない',
+      await N(page, '#m-pane-1 .t-row[data-key="酸味"] .chip.on') === 0);
+    await page.locator('#m-pane-1 .t-row[data-key="酸味"] .chip[data-val="非常に高い"]').click();
+    await page.locator('#m-pane-1 .t-row[data-key="余韻"] .chip[data-val="長い"]').click();
+    await page.waitForTimeout(200);
+    await page.locator('#m-times .chip', { hasText: '1回目' }).click();
+    await page.waitForTimeout(300);
+    check('1回目に戻ると1回目の値が出る',
+      (await page.locator('#m-pane-1 .t-row[data-key="酸味"] .chip.on').textContent()) === 'やや高',
+      await page.locator('#m-pane-1 .t-row[data-key="酸味"] .chip.on').textContent());
+    await page.click('#m-save'); await page.waitForTimeout(900);
+
+    const 二回 = await page.evaluate(() =>
+      (APP.S.items.find(i => Array.isArray(i.tasting) && i.tasting.length > 1) || {}).tasting || null);
+    check('2回ぶんが1枚に残る', !!二回 && 二回.length === 2, JSON.stringify(二回 && 二回.map(r => r.酸味)));
+    check('回ごとに別の値を持てる',
+      !!二回 && 二回[0].酸味 === 'やや高い' && 二回[1].酸味 === '非常に高い',
+      JSON.stringify(二回 && 二回.map(r => r.酸味)));
+    const タ2 = await page.evaluate(() =>
+      (APP.S.items.find(i => Array.isArray(i.tasting) && i.tasting.length > 1) || {}).tags || []);
+    check('両方の回の値がタグになる',
+      タ2.includes('酸味:やや高い') && タ2.includes('酸味:非常に高い'), JSON.stringify(タ2));
+
+    // 2回目を消して1回ぶんに戻す（以降の検査は1回ぶんを前提にしている）
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(500);
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(600);
+    check('開き直すと最後の回から始まる',
+      (await page.locator('#m-times .chip.on').textContent()) === '2回目',
+      await page.locator('#m-times .chip.on').textContent());
+    await page.locator('#m-times .chip', { hasText: 'この回を消す' }).click();
+    await page.waitForTimeout(400);
+    check('回を消せる', await N(page, '#m-times .chip', ) >= 1 &&
+      (await page.locator('#m-times .chip.on').textContent()) === '1回目');
+    await page.click('#m-save'); await page.waitForTimeout(900);
+    const 戻り回 = await page.evaluate(() =>
+      (APP.S.items.find(i => Array.isArray(i.tasting)) || {}).tasting || null);
+    check('消した回は残らない', !!戻り回 && 戻り回.length === 1, JSON.stringify(戻り回 && 戻り回.length));
+
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(500);
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(600);
+
     // もう一度押すと外れる（任意のままにできる）
     await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
     await page.waitForTimeout(200);

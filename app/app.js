@@ -313,6 +313,8 @@
 
   function paintModal() {
     var d = M.drafts[M.idx], multi = M.drafts.length > 1;
+    M.回 = null;              // 写真ごとに最後の回から始める
+    paintTimes();
     paintTasting();
 
     $('#m-count').textContent = M.mode === 'edit' ? '' :
@@ -451,15 +453,23 @@
   var 詳しく開く = false;
   try { 詳しく開く = localStorage.getItem('photomemo.tasting.more') === '1'; } catch (e) {}
 
-  function 今のシート() {
+  function 今の束() {
     var d = M.drafts[M.idx];
-    if (!d) return {};
-    if (!d.tasting) d.tasting = {};
+    if (!d) return [];
+    if (!Array.isArray(d.tasting)) d.tasting = 束(d.tasting);
+    if (!d.tasting.length) d.tasting.push({});
+    if (M.回 == null || M.回 < 0 || M.回 >= d.tasting.length) M.回 = d.tasting.length - 1;
     return d.tasting;
+  }
+
+  function 今のシート() {
+    var b = 今の束();
+    return b.length ? b[M.回] : {};
   }
 
   function シートに書く(鍵, 値) {
     var t = 今のシート();
+    if (!t.記録日時 && !回に中身(t)) t.記録日時 = new Date().toISOString();
     if (値 === null || 値 === undefined || 値 === '' || (Array.isArray(値) && !値.length)) delete t[鍵];
     else t[鍵] = 値;
   }
@@ -475,15 +485,22 @@
     var one = document.createElement('small');
     one.className = 'one'; one.textContent = 'この1枚に';
     lab.appendChild(one);
+    if (項.略) {
+      // 押すのは短い語なので、選んだ言葉そのものをラベル横に出す
+      var now = document.createElement('small');
+      now.className = 'src now';
+      lab.appendChild(now);
+    }
     wrap.appendChild(lab);
 
     if (項.型 === '選択' || 項.型 === '複数') {
       var chips = document.createElement('div');
-      chips.className = 'chips';
-      項.候補.forEach(function (n) {
+      chips.className = 項.略 ? 'chips scale' : 'chips';
+      項.候補.forEach(function (n, i) {
         var b = document.createElement('button');
         b.type = 'button'; b.className = 'chip'; b.dataset.val = n;
-        var 写 = 項.写真 && TASTING.香りの写真 && TASTING.香りの写真[n];
+        if (項.略) { b.textContent = 項.略[i]; b.title = n; b.setAttribute('aria-label', n); }
+        var 写 = !項.略 && 項.写真 && TASTING.香りの写真 && TASTING.香りの写真[n];
         if (写) {
           // 写真のある語は絵で選ぶ。無い語は文字のまま混ざる（欠けて見えないように）
           b.className = 'chip photo';
@@ -492,7 +509,7 @@
           var cap = document.createElement('span');
           cap.textContent = n;
           b.appendChild(im); b.appendChild(cap);
-        } else {
+        } else if (!項.略) {
           b.textContent = n;
         }
         b.onclick = function () {
@@ -505,7 +522,7 @@
             if (i >= 0) arr.splice(i, 1); else arr.push(n);
             シートに書く(項.鍵, arr);
           }
-          paintTasting();
+          paintTasting(); paintTimes();
         };
         chips.appendChild(b);
       });
@@ -532,7 +549,7 @@
         b.setAttribute('aria-label', n + ' / 5');
         b.onclick = function () {
           シートに書く(項.鍵, 今のシート()[項.鍵] === n ? null : n);
-          paintTasting();
+          paintTasting(); paintTimes();
         };
         box.appendChild(b);
       })(i);
@@ -544,7 +561,7 @@
       else { el.type = 'text'; if (項.数字) el.inputMode = 'numeric'; }
       el.placeholder = 項.例 || '';
       el.autocomplete = 'off';
-      el.oninput = function () { シートに書く(項.鍵, el.value.trim()); };
+      el.oninput = function () { シートに書く(項.鍵, el.value.trim()); paintTimes(); };
       wrap.appendChild(el);
     }
     return wrap;
@@ -575,6 +592,57 @@
     $('#m-tasting-more').setAttribute('aria-expanded', String(詳しく開く));
   }
 
+  /** 回の切り替え帯。1回目 / 2回目 … ＋もう一度 / この回を消す。 */
+  function paintTimes() {
+    var w = $('#m-times');
+    if (!w) return;
+    var b = 今の束();
+    w.innerHTML = '';
+
+    b.forEach(function (r, i) {
+      var t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'chip' + (i === M.回 ? ' on' : '');
+      t.textContent = (i + 1) + '回目';
+      t.onclick = function () { M.回 = i; paintTimes(); paintTasting(); };
+      w.appendChild(t);
+    });
+
+    var 足す = document.createElement('button');
+    足す.type = 'button';
+    足す.className = 'chip more';
+    足す.textContent = '＋ もう一度';
+    足す.onclick = function () {
+      var b2 = 今の束();
+      if (!回に中身(b2[b2.length - 1])) { M.回 = b2.length - 1; }  // 空の回が末尾にあるなら使い回す
+      else { b2.push({}); M.回 = b2.length - 1; }
+      paintTimes(); paintTasting();
+      $('#m-pane-1').scrollTop = 0;
+    };
+    w.appendChild(足す);
+
+    if (b.length > 1 || 回に中身(b[M.回])) {
+      var 消 = document.createElement('button');
+      消.type = 'button';
+      消.className = 'chip more rm';
+      消.textContent = 'この回を消す';
+      消.onclick = function () {
+        if (回に中身(b[M.回]) && !confirm((M.回 + 1) + '回目の記録を消します。写真とメモは残ります。')) return;
+        b.splice(M.回, 1);
+        M.回 = Math.max(0, M.回 - 1);
+        paintTimes(); paintTasting();
+      };
+      w.appendChild(消);
+    }
+
+    var 時 = b[M.回] && b[M.回].記録日時;
+    var 注 = document.createElement('span');
+    注.className = 'when';
+    注.textContent = 時 ? String(時).replace('T', ' ').slice(0, 16) + ' に記録'
+                        : 'まだ何も書いていない回です';
+    w.appendChild(注);
+  }
+
   /** 下書きの中身を画面へ映す。押すたびにここを通るので、状態は1か所に集まる。 */
   function paintTasting() {
     var t = 今のシート(), multi = M.drafts.length > 1;
@@ -593,6 +661,8 @@
       Array.prototype.forEach.call(row.querySelectorAll('.t-star'), function (b) {
         b.classList.toggle('on', Number(v || 0) >= Number(b.dataset.val));
       });
+      var now = row.querySelector('.lab .now');
+      if (now) now.textContent = v || '';
       var el = row.querySelector('input, textarea');
       if (el && el.value !== (v || '')) el.value = v || '';
       var one = row.querySelector('.lab .one');
@@ -626,18 +696,40 @@
   /* シートに書いた言葉を平らにする。項目が増えても手を入れなくて済むよう、
      鍵ではなく値だけを拾う。 */
   function 味の言葉(item) {
-    var t = item && item.tasting;
-    if (!t) return '';
     var out = [];
-    Object.keys(t).forEach(function (k) {
-      var v = t[k];
-      if (Array.isArray(v)) out.push(v.join(' '));
-      else if (v || v === 0) out.push(String(v));
+    束(item && item.tasting).forEach(function (r) {
+      Object.keys(r).forEach(function (k) {
+        if (k === '記録日時') return;
+        var v = r[k];
+        if (Array.isArray(v)) out.push(v.join(' '));
+        else if (v || v === 0) out.push(String(v));
+      });
     });
     return out.join(' ');
   }
 
-  function 中身あり(t) { return !!(t && Object.keys(t).length); }
+  /* シートは「1枚に何回ぶんでも」積める。中身は回の配列。
+     古い記録（1回ぶんのオブジェクト）は、読むときに1回目として包む。 */
+  function 束(t) {
+    if (Array.isArray(t)) return t;
+    return 回に中身(t) ? [t] : [];
+  }
+
+  function 回に中身(r) {
+    if (!r) return false;
+    return Object.keys(r).some(function (k) {
+      if (k === '記録日時') return false;          // 時刻だけの回は空とみなす
+      var v = r[k];
+      return Array.isArray(v) ? v.length > 0 : (v || v === 0);
+    });
+  }
+
+  function 中身あり(t) { return 束(t).some(回に中身); }
+
+  function 回の名(r, i) {
+    var 時 = r && r.記録日時;
+    return (i + 1) + '回目' + (時 ? '　' + String(時).replace('T', ' ').slice(0, 16) : '');
+  }
 
   /* ---- シートの値をタグへ写す ----
      形は「鍵:値」（例 酸味:やや高い）。値だけだと、やや高いが酸味か渋みか分からなくなる。
@@ -653,14 +745,15 @@
   }
 
   function シート由来のタグ(t) {
-    if (!中身あり(t)) return [];
     var 対象 = シートの鍵(), out = [];
-    Object.keys(t).forEach(function (k) {
-      if (!対象[k]) return;
-      var v = t[k];
-      (Array.isArray(v) ? v : [v]).forEach(function (x) {
-        x = String(x == null ? '' : x).trim();
-        if (x) out.push(k + ':' + x);
+    束(t).forEach(function (r) {
+      Object.keys(r).forEach(function (k) {
+        if (!対象[k]) return;
+        var v = r[k];
+        (Array.isArray(v) ? v : [v]).forEach(function (x) {
+          x = String(x == null ? '' : x).trim();
+          if (x && out.indexOf(k + ':' + x) < 0) out.push(k + ':' + x);
+        });
       });
     });
     return out;
@@ -685,7 +778,8 @@
 
     var writes = M.drafts.map(function (d) {
       // 手で付けたタグは全部に、シート由来は書いた1枚だけに付く
-      var 全タグ = tags.concat(シート由来のタグ(d.tasting)).filter(function (n, i, a) {
+      var 回列 = 束(d.tasting).filter(回に中身);
+      var 全タグ = tags.concat(シート由来のタグ(回列)).filter(function (n, i, a) {
         return a.indexOf(n) === i;
       });
       var item = {
@@ -694,7 +788,7 @@
         createdAt: d.createdAt || now, updatedAt: now,
         mime: d.mime, name: d.name, hash: d.hash, w: d.w, h: d.h, thumb: d.thumb
       };
-      if (中身あり(d.tasting)) item.tasting = d.tasting;
+      if (回列.length) item.tasting = 回列;
       return DB.putItem(item, d.blob);
     });
 
