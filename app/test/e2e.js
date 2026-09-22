@@ -238,6 +238,11 @@ const N = async (p, sel) => await p.locator(sel).count();
     const 香り後 = await page.locator('#m-pane-1 .t-row[data-key="香り"] .chip:visible').count();
     check('閉じても選んだ語は残って見える', 香り後 <= 15 &&
       await N(page,'#m-pane-1 .t-row[data-key="香り"] .chip.on:visible') === 2, String(香り後));
+    await page.locator('#m-pane-1 .t-row[data-key="果実の熟れ"] .chip', { hasText: '完熟' }).click();
+    await page.waitForTimeout(150);
+    check('果実の熟れを選べる',
+      await N(page, '#m-pane-1 .t-row[data-key="果実の熟れ"] .chip.on') === 1);
+
     // 目盛りは7つが1行。押すのは短い語で、記録は元の言葉
     await page.locator('#m-pane-1 .t-row[data-key="酸味"] .chip[data-val="やや高い"]').click();
     await page.waitForTimeout(200);
@@ -273,6 +278,7 @@ const N = async (p, sel) => await p.locator(sel).count();
     const タ = await page.evaluate(() =>
       (APP.S.items.find(i => Array.isArray(i.tasting) && i.tasting.some(r => r.ワイン名)) || {}).tags || []);
     check('目盛りも元の言葉でタグになる', タ.includes('酸味:やや高い'), JSON.stringify(タ));
+    check('熟れもタグになる', タ.includes('果実の熟れ:完熟'), JSON.stringify(タ));
     check('シートの値が「鍵:値」のタグになる',
       タ.includes('色:ガーネット') && タ.includes('香り:いちご') && タ.includes('香り:樽') &&
       タ.includes('評価:4') && タ.includes('ワイン名:ためしの一本'), JSON.stringify(タ));
