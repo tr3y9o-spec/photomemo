@@ -294,20 +294,24 @@
     });
   }
 
-  function openEdit(item) {
+  function openEdit(item, 控え) {
     DB.getBlob(item.id).then(function (b) {
       M.mode = 'edit'; M.idx = 0; M.tagsOpen = false;
-      M.folderId = item.folderId;
-      M.tags = 手のタグ(item.tags);
+      M.folderId = 控え && 控え.folderId ? 控え.folderId : item.folderId;
+      M.tags = 控え ? (控え.tags || []).slice() : 手のタグ(item.tags);
       M.drafts = [{
         id: item.id, blob: b, thumb: item.thumb, w: item.w, h: item.h,
         mime: item.mime, name: item.name, hash: item.hash,
-        date: item.date, dateSrc: '', memo: item.memo || '', url: item.url || '',
-        tasting: item.tasting || null,
+        date: (控え && 控え.date) || item.date, dateSrc: '',
+        memo: 控え ? (控え.memo || '') : (item.memo || ''),
+        url: 控え ? (控え.url || '') : (item.url || ''),
+        tasting: 控え ? (控え.tasting || []) : (item.tasting || null),
         dup: false, createdAt: item.createdAt
       }];
       paintModal();
       モーダルを開く();
+      控えを始める();
+      if (控え) toast('書きかけを戻しました', null);
     });
   }
 
@@ -1078,6 +1082,68 @@
     Promise.all(jobs).then(intake);
   }
 
+  /* ---- 書きかけの控え ----
+     編集中（すでに保存済みの写真に書き足しているとき）だけ、入力を2秒ごとに控える。
+     電源が落ちても、次に開いたときに拾い直せる。
+     保存の流れには割り込まない（背景で書くだけ）。新規の取り込みは対象外
+     ——写真そのものが未保存で重く、先に1タップ保存すれば済むため。 */
+  var 控えタイマー = null;
+  var 控えた印 = '';
+
+  function 控えを作る() {
+    if (M.mode !== 'edit') return null;
+    stash();
+    var d = M.drafts[0];
+    if (!d) return null;
+    return {
+      id: d.id, at: new Date().toISOString(),
+      folderId: M.folderId, tags: M.tags.slice(),
+      memo: d.memo || '', date: d.date || '', url: d.url || '',
+      tasting: 束(d.tasting).filter(回に中身)
+    };
+  }
+
+  function 控える() {
+    var c = 控えを作る();
+    if (!c) return;
+    var 印 = JSON.stringify([c.folderId, c.tags, c.memo, c.date, c.url, c.tasting]);
+    if (印 === 控えた印) return;          // 変わっていなければ書かない
+    控えた印 = 印;
+    DB.setMeta('draft', c).catch(function () {});
+  }
+
+  function 控えを始める() {
+    控えを終える();
+    控えた印 = JSON.stringify([M.folderId, M.tags, (M.drafts[0] || {}).memo || '',
+                              (M.drafts[0] || {}).date || '', (M.drafts[0] || {}).url || '',
+                              束((M.drafts[0] || {}).tasting).filter(回に中身)]);
+    控えタイマー = setInterval(控える, 2000);
+  }
+
+  function 控えを終える() {
+    if (控えタイマー) { clearInterval(控えタイマー); 控えタイマー = null; }
+  }
+
+  function 控えを捨てる() {
+    控えを終える();
+    控えた印 = '';
+    return DB.setMeta('draft', null).catch(function () {});
+  }
+
+  /** 起動時・画面を描くときに、残っている書きかけを拾う。 */
+  function 書きかけ() {
+    return DB.getMeta('draft').then(function (c) {
+      if (!c || !c.id) return null;
+      return S.items.some(function (i) { return i.id === c.id; }) ? c : null;
+    }).catch(function () { return null; });
+  }
+
+  function 書きかけを開く(c) {
+    var it = S.items.filter(function (i) { return i.id === c.id; })[0];
+    if (!it) return;
+    openEdit(it, c);
+  }
+
   /* ================= 保管と、気づかせ方 =================
      どちらも保存の道筋には割り込まない。出るのは画面の上に1本だけ。 */
 
@@ -1112,6 +1178,15 @@
     if (!el) return;
     if (sessionStorage.getItem('notice-dismissed')) { el.hidden = true; return; }
 
+    // 書きかけが残っていれば、まずそれを拾わせる
+    書きかけ().then(function (c) {
+      if (!c) return 知らせの続き();
+      var 時 = String(c.at || '').replace('T', ' ').slice(0, 16);
+      帯を出す({ 文: '書きかけが残っています（' + 時 + '）', 行: '書きかけ', 控え: c });
+    });
+  }
+
+  function 知らせの続き() {
     var 直近 = SYNC.直近();
     var 出す = null;
     if (!SYNC.使える()) {
@@ -1136,7 +1211,9 @@
     if (!出す) return;
     $('#notice-msg').textContent = 出す.文;
     $('#notice-act').onclick = function () {
-      if (出す.行 === '設定') 同期設定を開く(); else exportZip();
+      if (出す.行 === '書きかけ') 書きかけを開く(出す.控え);
+      else if (出す.行 === '設定') 同期設定を開く();
+      else exportZip();
     };
   }
 
@@ -1279,7 +1356,10 @@
         if (m) $('#m-url').value = m[0]; else toast('クリップボードに URL がありません', null);
       }).catch(function () { toast('クリップボードを読めません', null); });
     };
-    $('#modal').addEventListener('close', function () { M.drafts = []; });
+    $('#modal').addEventListener('close', function () {
+      M.drafts = [];
+      控えを捨てる().then(function () { 知らせを書く(); });   // 閉じた＝その書きかけは畳む
+    });
     // Esc で閉じても保存済みのものは消えない。新規なら破棄でよい。
     $('#modal').addEventListener('cancel', function () { /* 既定の挙動のまま */ });
 

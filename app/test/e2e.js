@@ -354,6 +354,54 @@ const N = async (p, sel) => await p.locator(sel).count();
     await page.locator('#m-pane-1 .t-row[data-key="色"] .chip', { hasText: 'ガーネット' }).click();
     await page.click('#m-save'); await page.waitForTimeout(800);
 
+    /* --- 書きかけの控え（電源が落ちた場合） --- */
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(400);
+    await page.fill('#m-memo', '書きかけのメモ');
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(500);
+    await page.locator('#m-pane-1 .t-row[data-key="余韻"] .chip[data-val="非常に長い"]').click();
+    await page.waitForTimeout(2600);           // 控えは2秒ごと
+    check('保存前は本体が書き換わらない',
+      await page.evaluate(() => !APP.S.items.some(i => i.memo === '書きかけのメモ')));
+
+    // 電源が落ちた＝保存も取り消しもせずに読み込み直す
+    await page.goto('http://127.0.0.1:8777/', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1200);
+    check('書きかけの帯が出る',
+      (await page.locator('#notice-msg').textContent()).includes('書きかけ'),
+      await page.locator('#notice-msg').textContent());
+    await page.click('#notice-act'); await page.waitForTimeout(900);
+    check('押すと編集で開く', await N(page, '#modal[open]') === 1);
+    check('メモが戻る', (await page.inputValue('#m-memo')) === '書きかけのメモ',
+      await page.inputValue('#m-memo'));
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(500);
+    check('シートの入力も戻る',
+      (await page.locator('#m-pane-1 .t-row[data-key="余韻"] .chip.on').textContent()) === '極長',
+      await page.locator('#m-pane-1 .t-row[data-key="余韻"] .chip.on').textContent());
+    await page.click('#m-save'); await page.waitForTimeout(900);
+    check('保存すると本体に入る',
+      await page.evaluate(() => APP.S.items.some(i => i.memo === '書きかけのメモ')));
+    check('保存後は帯が消える',
+      !((await page.locator('#notice').isVisible()) &&
+        (await page.locator('#notice-msg').textContent()).includes('書きかけ')));
+
+    // 後の検査に響かないよう、書き足したものを戻す
+    // （読み込み直した直後はフォルダ一覧に居るので、まず中へ入る）
+    await page.waitForFunction(() => !document.querySelector('#modal').open);
+    await page.waitForTimeout(600);
+    await page.locator('.folder', { hasText: '資料' }).click();
+    await page.waitForTimeout(600);
+    check('読み込み直しても5枚ある', await N(page, '.tile') === 5, String(await N(page, '.tile')));
+    await page.locator('.tile').first().click();
+    await page.waitForSelector('#modal[open]'); await page.waitForTimeout(500);
+    await page.fill('#m-memo', 'あとから書き足した');
+    await page.locator('.m-tab').nth(1).click(); await page.waitForTimeout(600);
+    await page.locator('#m-pane-1 .t-row[data-key="余韻"] .chip.on').click();  // 選び直して外す
+    await page.waitForTimeout(200);
+    await page.click('#m-save');
+    await page.waitForFunction(() => !document.querySelector('#modal').open);
+    await page.waitForTimeout(700);
+
     /* --- テイスティングシート（器だけ。画面はまだ無いので直接書く） --- */
     await page.evaluate(async () => {
       // 1枚目は後で削除の検査に使われるので、最後まで残る「さんまいめ」に書く
